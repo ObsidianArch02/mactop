@@ -43,6 +43,7 @@ typedef struct {
 
 typedef struct {
     int status_bar_width;
+    int status_bar_height;
     int sparkline_width;
     int sparkline_height;
     int show_cpu;
@@ -126,6 +127,7 @@ func applyMenuBarConfig() {
 	mbCfg := loadMenuBarConfig()
 	var ccfg C.menubar_config_t
 	ccfg.status_bar_width = C.int(mbCfg.StatusBarWidth)
+	ccfg.status_bar_height = C.int(mbCfg.StatusBarHeight)
 	ccfg.sparkline_width = C.int(mbCfg.SparklineWidth)
 	ccfg.sparkline_height = C.int(mbCfg.SparklineHeight)
 	ccfg.show_cpu = boolToInt(mbCfg.ShowCPU, 1)
@@ -147,7 +149,7 @@ func applyMenuBarConfig() {
 // GoSaveMenuBarConfig is called from ObjC when settings change
 //
 //export GoSaveMenuBarConfig
-func GoSaveMenuBarConfig(statusBarWidth, sparklineWidth, showCPU, showGPU, showANE, showMem, showPower, showPercent,
+func GoSaveMenuBarConfig(statusBarWidth, statusBarHeight, sparklineWidth, showCPU, showGPU, showANE, showMem, showPower, showPercent,
 	fontSize, powerFontSize C.int,
 	cpuHex, gpuHex, aneHex, memHex *C.char) {
 	if currentConfig.MenuBar == nil {
@@ -157,6 +159,9 @@ func GoSaveMenuBarConfig(statusBarWidth, sparklineWidth, showCPU, showGPU, showA
 
 	if statusBarWidth > 0 {
 		m.StatusBarWidth = int(statusBarWidth)
+	}
+	if statusBarHeight > 0 {
+		m.StatusBarHeight = int(statusBarHeight)
 	}
 	if sparklineWidth > 0 {
 		m.SparklineWidth = int(sparklineWidth)

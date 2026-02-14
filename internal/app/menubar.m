@@ -49,6 +49,7 @@ typedef struct {
 // Config passed from Go
 typedef struct {
   int status_bar_width;
+  int status_bar_height;
   int sparkline_width;
   int sparkline_height;
   int show_cpu;
@@ -66,16 +67,18 @@ typedef struct {
 } menubar_config_t;
 
 // Go callback for persisting settings
-extern void GoSaveMenuBarConfig(int statusBarWidth, int sparklineWidth,
-                                int showCPU, int showGPU, int showANE,
-                                int showMem, int showPower, int showPercent,
-                                int fontSize, int powerFontSize,
-                                const char *cpuHex, const char *gpuHex,
-                                const char *aneHex, const char *memHex);
+extern void GoSaveMenuBarConfig(int statusBarWidth, int statusBarHeight,
+                                int sparklineWidth, int showCPU, int showGPU,
+                                int showANE, int showMem, int showPower,
+                                int showPercent, int fontSize,
+                                int powerFontSize, const char *cpuHex,
+                                const char *gpuHex, const char *aneHex,
+                                const char *memHex);
 
 // Global state
 static menubar_config_t g_config = {
     .status_bar_width = 28,
+    .status_bar_height = 18,
     .sparkline_width = 420,
     .sparkline_height = 60,
     .show_cpu = 1,
@@ -319,6 +322,8 @@ static NSColor *headerColor(void) { return [NSColor whiteColor]; }
 @property(strong) NSButton *percentCheck;
 @property(strong) NSSlider *widthSlider;
 @property(strong) NSTextField *widthLabel;
+@property(strong) NSSlider *heightSlider;
+@property(strong) NSTextField *heightLabel;
 @property(strong) NSSlider *fontSizeSlider;
 @property(strong) NSTextField *fontSizeLabel;
 @property(strong) NSSlider *powerFontSlider;
@@ -333,7 +338,7 @@ static NSColor *headerColor(void) { return [NSColor whiteColor]; }
 
 - (instancetype)init {
   CGFloat w = 320;
-  CGFloat h = 540;
+  CGFloat h = 600;
   NSRect frame = NSMakeRect(0, 0, w, h);
   NSWindow *window = [[NSWindow alloc]
       initWithContentRect:frame
@@ -425,6 +430,24 @@ static NSColor *headerColor(void) { return [NSColor whiteColor]; }
   _widthLabel = [NSTextField labelWithString:@"28"];
   _widthLabel.frame = NSMakeRect(x + 190, y, 50, lh);
   [view addSubview:_widthLabel];
+  y -= 32;
+
+  // Bar Height
+  NSTextField *hl = [NSTextField labelWithString:@"Status Bar Height:"];
+  hl.frame = NSMakeRect(x, y, lw, lh);
+  [view addSubview:hl];
+  y -= 22;
+
+  _heightSlider = [[NSSlider alloc] initWithFrame:NSMakeRect(x, y, 180, lh)];
+  _heightSlider.minValue = 12;
+  _heightSlider.maxValue = 36;
+  _heightSlider.target = self;
+  _heightSlider.action = @selector(sliderChanged:);
+  [view addSubview:_heightSlider];
+
+  _heightLabel = [NSTextField labelWithString:@"18"];
+  _heightLabel.frame = NSMakeRect(x + 190, y, 50, lh);
+  [view addSubview:_heightLabel];
   y -= 32;
 
   // Font Size (Bars)
@@ -539,6 +562,10 @@ static NSColor *headerColor(void) { return [NSColor whiteColor]; }
   _widthLabel.stringValue =
       [NSString stringWithFormat:@"%d", g_config.status_bar_width];
 
+  _heightSlider.integerValue = g_config.status_bar_height;
+  _heightLabel.stringValue =
+      [NSString stringWithFormat:@"%d", g_config.status_bar_height];
+
   _fontSizeSlider.integerValue = g_config.font_size;
   _fontSizeLabel.stringValue =
       [NSString stringWithFormat:@"%d", g_config.font_size];
@@ -567,6 +594,10 @@ static NSColor *headerColor(void) { return [NSColor whiteColor]; }
   g_config.status_bar_width = _widthSlider.intValue;
   _widthLabel.stringValue =
       [NSString stringWithFormat:@"%d", g_config.status_bar_width];
+
+  g_config.status_bar_height = _heightSlider.intValue;
+  _heightLabel.stringValue =
+      [NSString stringWithFormat:@"%d", g_config.status_bar_height];
 
   g_config.font_size = _fontSizeSlider.intValue;
   _fontSizeLabel.stringValue =
@@ -652,7 +683,7 @@ static NSMenuItem *makeBrandingItem(void) {
                                          keyEquivalent:@""];
   CGFloat chartW = (CGFloat)g_config.sparkline_width;
   CGFloat width = chartW + 16;
-  CGFloat height = 22;
+  CGFloat height = 24;
   NSView *container =
       [[NSView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
   NSTextField *field =
@@ -757,7 +788,19 @@ static NSImage *drawStatusBarImage(double cpu, double gpu, double ane,
       (CGFloat)(g_config.power_font_size > 0 ? g_config.power_font_size : 11);
 
   // Calculate dimensions
-  CGFloat barH = 8, gap = 6;
+  CGFloat h =
+      (CGFloat)(g_config.status_bar_height > 0 ? g_config.status_bar_height
+                                               : 18);
+  // Ensure bounds accommodate largest font
+  if (h < fontSize + 4)
+    h = fontSize + 4;
+  if (h < powerFontSize + 4)
+    h = powerFontSize + 4;
+
+  CGFloat gap = 6;
+  CGFloat barH = h - 10; // Scale bar thickness with height
+  if (barH < 4)
+    barH = 4;
   CGFloat barW = (CGFloat)g_config.status_bar_width;
   CGFloat labelW = fontSize + 4;
   CGFloat percentW = g_config.show_percent ? (fontSize * 3.5) : 0.0;
@@ -785,13 +828,6 @@ static NSImage *drawStatusBarImage(double cpu, double gpu, double ane,
       totalW += gap; // Add gap if there are other bars
     totalW += textW;
   }
-
-  CGFloat h = 18;
-  // Ensure bounds accommodate largest font
-  if (h < fontSize + 4)
-    h = fontSize + 4;
-  if (h < powerFontSize + 4)
-    h = powerFontSize + 4;
 
   NSImage *img = [[NSImage alloc] initWithSize:NSMakeSize(totalW, h)];
   [img lockFocus];
@@ -918,11 +954,12 @@ static void persistConfig(void) {
   dispatch_async(
       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         GoSaveMenuBarConfig(
-            g_config.status_bar_width, g_config.sparkline_width,
-            g_config.show_cpu, g_config.show_gpu, g_config.show_ane,
-            g_config.show_memory, g_config.show_power, g_config.show_percent,
-            g_config.font_size, g_config.power_font_size, g_config.cpu_color,
-            g_config.gpu_color, g_config.ane_color, g_config.mem_color);
+            g_config.status_bar_width, g_config.status_bar_height,
+            g_config.sparkline_width, g_config.show_cpu, g_config.show_gpu,
+            g_config.show_ane, g_config.show_memory, g_config.show_power,
+            g_config.show_percent, g_config.font_size, g_config.power_font_size,
+            g_config.cpu_color, g_config.gpu_color, g_config.ane_color,
+            g_config.mem_color);
       });
 }
 

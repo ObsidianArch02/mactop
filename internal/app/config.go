@@ -28,21 +28,22 @@ type CustomThemeConfig struct {
 
 // MenuBarConfig controls the appearance of the --menubar status item
 type MenuBarConfig struct {
-	StatusBarWidth  int    `json:"status_bar_width,omitempty"` // Width of each bar in status bar (px, default: 24)
-	SparklineWidth  int    `json:"sparkline_width,omitempty"`  // Width of sparkline graphs in dropdown (px, default: 300)
-	SparklineHeight int    `json:"sparkline_height,omitempty"` // Height of sparkline graphs in dropdown (px, default: 40)
-	ShowCPU         *bool  `json:"show_cpu,omitempty"`         // Show CPU bar in status bar (default: true)
-	ShowGPU         *bool  `json:"show_gpu,omitempty"`         // Show GPU bar in status bar (default: true)
-	ShowANE         *bool  `json:"show_ane,omitempty"`         // Show ANE bar in status bar (default: true)
-	ShowMemory      *bool  `json:"show_memory,omitempty"`      // Show Memory bar in status bar (default: true)
-	ShowPower       *bool  `json:"show_power,omitempty"`       // Show power watts text (default: true)
-	ShowPercent     *bool  `json:"show_percent,omitempty"`     // Show percentage text next to bars (default: false)
-	FontSize        int    `json:"font_size,omitempty"`        // Font size for status bars (px, default: 10)
-	PowerFontSize   int    `json:"power_font_size,omitempty"`  // Font size for power watts (px, default: 11)
-	CPUColor        string `json:"cpu_color,omitempty"`        // Hex color for CPU bar (default: systemGreen)
-	GPUColor        string `json:"gpu_color,omitempty"`        // Hex color for GPU bar (default: systemCyan)
-	ANEColor        string `json:"ane_color,omitempty"`        // Hex color for ANE bar (default: systemPurple)
-	MemColor        string `json:"mem_color,omitempty"`        // Hex color for Memory bar (default: systemOrange)
+	StatusBarWidth  int    `json:"status_bar_width,omitempty"`  // Width of each bar in status bar (px, default: 24)
+	StatusBarHeight int    `json:"status_bar_height,omitempty"` // Height/thickness of status bar (px, default: 18)
+	SparklineWidth  int    `json:"sparkline_width,omitempty"`   // Width of sparkline graphs in dropdown (px, default: 300)
+	SparklineHeight int    `json:"sparkline_height,omitempty"`  // Height of sparkline graphs in dropdown (px, default: 40)
+	ShowCPU         *bool  `json:"show_cpu,omitempty"`          // Show CPU bar in status bar (default: true)
+	ShowGPU         *bool  `json:"show_gpu,omitempty"`          // Show GPU bar in status bar (default: true)
+	ShowANE         *bool  `json:"show_ane,omitempty"`          // Show ANE bar in status bar (default: true)
+	ShowMemory      *bool  `json:"show_memory,omitempty"`       // Show Memory bar in status bar (default: true)
+	ShowPower       *bool  `json:"show_power,omitempty"`        // Show power watts text (default: true)
+	ShowPercent     *bool  `json:"show_percent,omitempty"`      // Show percentage text next to bars (default: false)
+	FontSize        int    `json:"font_size,omitempty"`         // Font size for status bars (px, default: 10)
+	PowerFontSize   int    `json:"power_font_size,omitempty"`   // Font size for power watts (px, default: 11)
+	CPUColor        string `json:"cpu_color,omitempty"`         // Hex color for CPU bar (default: systemGreen)
+	GPUColor        string `json:"gpu_color,omitempty"`         // Hex color for GPU bar (default: systemCyan)
+	ANEColor        string `json:"ane_color,omitempty"`         // Hex color for ANE bar (default: systemPurple)
+	MemColor        string `json:"mem_color,omitempty"`         // Hex color for Memory bar (default: systemOrange)
 }
 
 type AppConfig struct {
@@ -59,6 +60,7 @@ type AppConfig struct {
 func loadMenuBarConfig() MenuBarConfig {
 	cfg := MenuBarConfig{
 		StatusBarWidth:  24,
+		StatusBarHeight: 18,
 		SparklineWidth:  300,
 		SparklineHeight: 40,
 		FontSize:        10,
@@ -68,6 +70,9 @@ func loadMenuBarConfig() MenuBarConfig {
 		m := currentConfig.MenuBar
 		if m.StatusBarWidth > 0 {
 			cfg.StatusBarWidth = m.StatusBarWidth
+		}
+		if m.StatusBarHeight > 0 {
+			cfg.StatusBarHeight = m.StatusBarHeight
 		}
 		if m.SparklineWidth > 0 {
 			cfg.SparklineWidth = m.SparklineWidth
