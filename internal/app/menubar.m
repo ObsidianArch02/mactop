@@ -56,6 +56,7 @@ typedef struct {
   int show_ane;
   int show_memory;
   int show_power;
+  int show_percent;
   char cpu_color[8];
   char gpu_color[8];
   char ane_color[8];
@@ -63,8 +64,9 @@ typedef struct {
 } menubar_config_t;
 
 // Go callback for persisting settings
-extern void GoSaveMenuBarConfig(int showCPU, int showGPU, int showANE,
-                                int showMem, int showPower, const char *cpuHex,
+extern void GoSaveMenuBarConfig(int statusBarWidth, int showCPU, int showGPU,
+                                int showANE, int showMem, int showPower,
+                                int showPercent, const char *cpuHex,
                                 const char *gpuHex, const char *aneHex,
                                 const char *memHex);
 
@@ -78,6 +80,7 @@ static menubar_config_t g_config = {
     .show_ane = 1,
     .show_memory = 0,
     .show_power = 1,
+    .show_percent = 0,
     .cpu_color = "",
     .gpu_color = "",
     .ane_color = "",
@@ -169,7 +172,8 @@ static NSColor *headerColor(void) { return [NSColor whiteColor]; }
 - (instancetype)initWithText:(NSString *)text
                         font:(NSFont *)font
                        color:(NSColor *)color {
-  CGFloat width = 320;
+  CGFloat chartW = (CGFloat)g_config.sparkline_width;
+  CGFloat width = chartW + 16;
   CGFloat height = 20;
   self = [super initWithFrame:NSMakeRect(0, 0, width, height)];
   if (self) {
@@ -188,44 +192,52 @@ static NSColor *headerColor(void) { return [NSColor whiteColor]; }
 @end
 
 @interface MactopMetricView : NSView
-@property(strong, nonatomic) NSTextField *field;
+@property(strong, nonatomic) NSTextField *labelField;
+@property(strong, nonatomic) NSTextField *valueField;
 @end
 
 @implementation MactopMetricView
 - (instancetype)initWithLabel:(NSString *)lbl value:(NSString *)val {
-  CGFloat width = 320;
+  CGFloat chartW = (CGFloat)g_config.sparkline_width;
+  CGFloat width = chartW + 16;
   CGFloat height = 20;
   self = [super initWithFrame:NSMakeRect(0, 0, width, height)];
   if (self) {
-    _field = [[NSTextField alloc]
-        initWithFrame:NSMakeRect(8, 0, width - 16, height)];
-    _field.drawsBackground = NO;
-    _field.bordered = NO;
-    _field.editable = NO;
-    _field.selectable = NO;
+    CGFloat halfW = (width - 16) / 2.0;
+
+    // Label (Left)
+    _labelField =
+        [[NSTextField alloc] initWithFrame:NSMakeRect(8, 0, halfW, height)];
+    _labelField.drawsBackground = NO;
+    _labelField.bordered = NO;
+    _labelField.editable = NO;
+    _labelField.selectable = NO;
+    _labelField.font = metricFont();
+    _labelField.textColor = labelDimColor();
+    _labelField.alignment = NSTextAlignmentLeft;
+
+    // Value (Right)
+    _valueField = [[NSTextField alloc]
+        initWithFrame:NSMakeRect(8 + halfW, 0, halfW, height)];
+    _valueField.drawsBackground = NO;
+    _valueField.bordered = NO;
+    _valueField.editable = NO;
+    _valueField.selectable = NO;
+    _valueField.font = metricFont();
+    _valueField.textColor = valueColor();
+    _valueField.alignment = NSTextAlignmentRight;
+
+    [self addSubview:_labelField];
+    [self addSubview:_valueField];
+
     [self setTwoToneLabel:lbl value:val];
-    [self addSubview:_field];
   }
   return self;
 }
 
 - (void)setTwoToneLabel:(NSString *)lbl value:(NSString *)val {
-  NSMutableAttributedString *as = [[NSMutableAttributedString alloc] init];
-  [as appendAttributedString:[[NSAttributedString alloc]
-                                 initWithString:lbl
-                                     attributes:@{
-                                       NSFontAttributeName : metricFont(),
-                                       NSForegroundColorAttributeName :
-                                           labelDimColor()
-                                     }]];
-  [as appendAttributedString:[[NSAttributedString alloc]
-                                 initWithString:val
-                                     attributes:@{
-                                       NSFontAttributeName : metricFont(),
-                                       NSForegroundColorAttributeName :
-                                           valueColor()
-                                     }]];
-  _field.attributedStringValue = as;
+  _labelField.stringValue = lbl;
+  _valueField.stringValue = val;
 }
 @end
 
@@ -343,6 +355,26 @@ static NSColor *headerColor(void) { return [NSColor whiteColor]; }
       g_config.show_power ? NSControlStateValueOn : NSControlStateValueOff;
   persistConfig();
 }
+- (void)togglePercent:(NSMenuItem *)item {
+  g_config.show_percent = !g_config.show_percent;
+  item.state =
+      g_config.show_percent ? NSControlStateValueOn : NSControlStateValueOff;
+  persistConfig();
+}
+
+- (void)increaseBarWidth:(id)sender {
+  g_config.status_bar_width += 4;
+  if (g_config.status_bar_width > 120)
+    g_config.status_bar_width = 120;
+  persistConfig();
+}
+
+- (void)decreaseBarWidth:(id)sender {
+  g_config.status_bar_width -= 4;
+  if (g_config.status_bar_width < 16)
+    g_config.status_bar_width = 16;
+  persistConfig();
+}
 
 // Color picker actions
 - (void)pickCPUColor:(NSMenuItem *)item {
@@ -440,6 +472,7 @@ static NSColor *headerColor(void) { return [NSColor whiteColor]; }
 
   // Model header
   MactopLabelView *mv = (MactopLabelView *)self.modelItem.view;
+  mv.label.alignment = NSTextAlignmentCenter;
   mv.label.stringValue =
       [NSString stringWithFormat:@"%s  (%dE + %dP + %dGPU)", metrics.model_name,
                                  metrics.e_core_count, metrics.p_core_count,
@@ -447,42 +480,49 @@ static NSColor *headerColor(void) { return [NSColor whiteColor]; }
 
   // CPU
   MactopMetricView *v = (MactopMetricView *)self.cpuUsageItem.view;
-  [v setTwoToneLabel:@"  Usage:     "
+  [v setTwoToneLabel:@"Usage:"
                value:[NSString
                          stringWithFormat:@"%.1f%%", metrics.cpu_percent]];
+
   v = (MactopMetricView *)self.cpuEClusterItem.view;
-  [v setTwoToneLabel:@"  E-Cluster: "
+  [v setTwoToneLabel:@"E-Cluster:"
                value:[NSString stringWithFormat:@"%d MHz (%.1f%%)",
                                                 metrics.ecluster_freq_mhz,
                                                 metrics.ecluster_active]];
+
   v = (MactopMetricView *)self.cpuPClusterItem.view;
-  [v setTwoToneLabel:@"  P-Cluster: "
+  [v setTwoToneLabel:@"P-Cluster:"
                value:[NSString stringWithFormat:@"%d MHz (%.1f%%)",
                                                 metrics.pcluster_freq_mhz,
                                                 metrics.pcluster_active]];
+
   v = (MactopMetricView *)self.cpuWattsItem.view;
-  [v setTwoToneLabel:@"  Power:     "
+  [v setTwoToneLabel:@"Power:"
                value:[NSString stringWithFormat:@"%.2f W", metrics.cpu_watts]];
+
   v = (MactopMetricView *)self.cpuTempItem.view;
-  [v setTwoToneLabel:@"  Temp:      "
+  [v setTwoToneLabel:@"Temp:"
                value:[NSString stringWithFormat:@"%.1f°C", metrics.cpu_temp]];
 
   // GPU
   v = (MactopMetricView *)self.gpuUsageItem.view;
-  [v setTwoToneLabel:@"  Usage:     "
+  [v setTwoToneLabel:@"Usage:"
                value:[NSString stringWithFormat:@"%.1f%% (%d MHz)",
                                                 metrics.gpu_percent,
                                                 metrics.gpu_freq_mhz]];
+
   v = (MactopMetricView *)self.gpuWattsItem.view;
-  [v setTwoToneLabel:@"  Power:     "
+  [v setTwoToneLabel:@"Power:"
                value:[NSString stringWithFormat:@"%.2f W", metrics.gpu_watts]];
+
   double activeTF = (metrics.gpu_percent / 100.0) * metrics.tflops_fp32;
   v = (MactopMetricView *)self.gpuTflopsItem.view;
-  [v setTwoToneLabel:@"  TFLOPs:    "
+  [v setTwoToneLabel:@"TFLOPs:"
                value:[NSString stringWithFormat:@"%.2f / %.2f FP32", activeTF,
                                                 metrics.tflops_fp32]];
+
   v = (MactopMetricView *)self.gpuTempItem.view;
-  [v setTwoToneLabel:@"  Temp:      "
+  [v setTwoToneLabel:@"Temp:"
                value:[NSString stringWithFormat:@"%.1f°C", metrics.gpu_temp]];
 
   // Memory — display GB
@@ -491,61 +531,63 @@ static NSColor *headerColor(void) { return [NSColor whiteColor]; }
   double memTotalGB =
       (double)metrics.mem_total_bytes / (1024.0 * 1024.0 * 1024.0);
   v = (MactopMetricView *)self.memUsageItem.view;
-  [v setTwoToneLabel:@"  RAM:       "
+  [v setTwoToneLabel:@"RAM:"
                value:[NSString stringWithFormat:@"%.1f / %.0f GB (%.1f%%)",
                                                 memUsedGB, memTotalGB, memPct]];
+
   double swapUsedGB =
       (double)metrics.swap_used_bytes / (1024.0 * 1024.0 * 1024.0);
   double swapTotalGB =
       (double)metrics.swap_total_bytes / (1024.0 * 1024.0 * 1024.0);
   v = (MactopMetricView *)self.memSwapItem.view;
-  [v setTwoToneLabel:@"  Swap:      "
+  [v setTwoToneLabel:@"Swap:"
                value:[NSString stringWithFormat:@"%.1f / %.1f GB", swapUsedGB,
                                                 swapTotalGB]];
 
   // Network
   v = (MactopMetricView *)self.netItem.view;
-  [v setTwoToneLabel:@"  "
+  [v setTwoToneLabel:@"Network:"
                value:[NSString
                          stringWithFormat:@"↓ %@  ↑ %@",
                                           formatThroughput(
                                               metrics.net_in_bytes_per_sec),
                                           formatThroughput(
                                               metrics.net_out_bytes_per_sec)]];
+
   v = (MactopMetricView *)self.rdmaItem.view;
-  [v setTwoToneLabel:@"  RDMA:    "
+  [v setTwoToneLabel:@"RDMA:"
                value:[NSString stringWithUTF8String:metrics.rdma_status]];
 
   // Disk
   v = (MactopMetricView *)self.diskItem.view;
-  [v setTwoToneLabel:@"  "
+  [v setTwoToneLabel:@"Disk:"
                value:[NSString stringWithFormat:@"R %.0f KB/s  W %.0f KB/s",
                                                 metrics.disk_read_kb_per_sec,
                                                 metrics.disk_write_kb_per_sec]];
 
   // Power
   v = (MactopMetricView *)self.powerTotalItem.view;
-  [v setTwoToneLabel:@"  Total:   "
+  [v setTwoToneLabel:@"Total:"
                value:[NSString
                          stringWithFormat:@"%.2f W", metrics.total_watts]];
   v = (MactopMetricView *)self.powerPackageItem.view;
-  [v setTwoToneLabel:@"  System:  "
+  [v setTwoToneLabel:@"System:"
                value:[NSString
                          stringWithFormat:@"%.2f W", metrics.package_watts]];
   v = (MactopMetricView *)self.powerCpuItem.view;
-  [v setTwoToneLabel:@"  CPU:     "
+  [v setTwoToneLabel:@"CPU:"
                value:[NSString stringWithFormat:@"%.2f W", metrics.cpu_watts]];
   v = (MactopMetricView *)self.powerGpuItem.view;
-  [v setTwoToneLabel:@"  GPU:     "
+  [v setTwoToneLabel:@"GPU:"
                value:[NSString stringWithFormat:@"%.2f W", metrics.gpu_watts]];
   v = (MactopMetricView *)self.powerAneItem.view;
-  [v setTwoToneLabel:@"  ANE:     "
+  [v setTwoToneLabel:@"ANE:"
                value:[NSString stringWithFormat:@"%.2f W", metrics.ane_watts]];
   v = (MactopMetricView *)self.powerDramItem.view;
-  [v setTwoToneLabel:@"  DRAM:    "
+  [v setTwoToneLabel:@"DRAM:"
                value:[NSString stringWithFormat:@"%.2f W", metrics.dram_watts]];
   v = (MactopMetricView *)self.thermalItem.view;
-  [v setTwoToneLabel:@"  Thermal: "
+  [v setTwoToneLabel:@"Thermal:"
                value:[NSString stringWithUTF8String:metrics.thermal_state]];
 
   // Sparklines
@@ -616,22 +658,27 @@ static NSMenuItem *makeSparkItem(NSImage *img) {
   return item;
 }
 
-// Branding header: "mactop" bold white + "by Carsen Klock" dim grey
+// Branding header: "mactop" bold white
 static NSMenuItem *makeBrandingItem(void) {
   NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:@""
                                                 action:nil
                                          keyEquivalent:@""];
-  CGFloat width = 320;
+  CGFloat chartW = (CGFloat)g_config.sparkline_width;
+  CGFloat width = chartW + 16;
   CGFloat height = 22;
   NSView *container =
       [[NSView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
 
   NSTextField *field =
-      [[NSTextField alloc] initWithFrame:NSMakeRect(8, 0, width - 16, height)];
+      [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
   field.drawsBackground = NO;
   field.bordered = NO;
   field.editable = NO;
   field.selectable = NO;
+  field.alignment = NSTextAlignmentCenter;
+
+  NSMutableParagraphStyle *style = [[NSMutableParagraphStyle alloc] init];
+  style.alignment = NSTextAlignmentCenter;
 
   NSMutableAttributedString *as = [[NSMutableAttributedString alloc] init];
   [as appendAttributedString:[[NSAttributedString alloc]
@@ -641,7 +688,8 @@ static NSMenuItem *makeBrandingItem(void) {
                                            systemFontOfSize:14
                                                      weight:NSFontWeightHeavy],
                                        NSForegroundColorAttributeName :
-                                           [NSColor whiteColor]
+                                           [NSColor whiteColor],
+                                       NSParagraphStyleAttributeName : style
                                      }]];
   field.attributedStringValue = as;
   [container addSubview:field];
@@ -652,7 +700,8 @@ static NSMenuItem *makeBrandingItem(void) {
 // ---- Status Bar Drawing (Horizontal side-by-side bars) ----
 
 static void drawHBar(NSString *label, double pct, NSColor *color, CGFloat x,
-                     CGFloat barY, CGFloat barW, CGFloat barH) {
+                     CGFloat barY, CGFloat barW, CGFloat barH,
+                     int showPercent) {
   CGFloat fill = (pct / 100.0) * barW;
   if (fill < 1.0 && pct > 0)
     fill = 1.0;
@@ -687,6 +736,20 @@ static void drawHBar(NSString *label, double pct, NSColor *color, CGFloat x,
                                         yRadius:2];
     [bar fill];
   }
+
+  // Percentage Text (if enabled)
+  if (showPercent) {
+    NSFont *pf = [NSFont monospacedDigitSystemFontOfSize:9
+                                                  weight:NSFontWeightRegular];
+    NSDictionary *pa = @{
+      NSFontAttributeName : pf,
+      NSForegroundColorAttributeName : [NSColor whiteColor]
+    };
+    NSString *pStr = [NSString stringWithFormat:@"%.0f%%", pct];
+    CGFloat px = bx + barW + 2;
+    CGFloat py = barY + (barH - [pStr sizeWithAttributes:pa].height) / 2.0 - 1;
+    [pStr drawAtPoint:NSMakePoint(px, py) withAttributes:pa];
+  }
 }
 
 static NSImage *drawStatusBarImage(double cpu, double gpu, double ane,
@@ -706,8 +769,17 @@ static NSImage *drawStatusBarImage(double cpu, double gpu, double ane,
     return empty;
   }
 
-  CGFloat barH = 8, barW = 30, gap = 2, labelExtra = 10;
-  CGFloat sectionW = labelExtra + barW;
+  CGFloat barH = 8, gap = 2, labelExtra = 10;
+  CGFloat barW = (CGFloat)g_config.status_bar_width;
+
+  // If showing percent, add specific space for "100%" (~24px)
+  CGFloat percentExtra = g_config.show_percent ? 24.0 : 0.0;
+
+  CGFloat sectionW = labelExtra + barW + percentExtra;
+  // Reduce gap if percentages are shown since they have their own spacing
+  if (g_config.show_percent)
+    gap = 4; // Explicit gap between sections
+
   CGFloat totalW = barCount * sectionW + (barCount - 1) * gap + 4;
   CGFloat h = 18;
 
@@ -718,19 +790,20 @@ static NSImage *drawStatusBarImage(double cpu, double gpu, double ane,
   CGFloat x = 2;
 
   if (g_config.show_cpu) {
-    drawHBar(@"C", cpu, cpuColor(), x, barY, barW, barH);
+    drawHBar(@"C", cpu, cpuColor(), x, barY, barW, barH, g_config.show_percent);
     x += sectionW + gap;
   }
   if (g_config.show_gpu) {
-    drawHBar(@"G", gpu, gpuColor(), x, barY, barW, barH);
+    drawHBar(@"G", gpu, gpuColor(), x, barY, barW, barH, g_config.show_percent);
     x += sectionW + gap;
   }
   if (g_config.show_ane) {
-    drawHBar(@"A", ane, aneColor(), x, barY, barW, barH);
+    drawHBar(@"A", ane, aneColor(), x, barY, barW, barH, g_config.show_percent);
     x += sectionW + gap;
   }
   if (g_config.show_memory) {
-    drawHBar(@"M", memPct, memColor(), x, barY, barW, barH);
+    drawHBar(@"M", memPct, memColor(), x, barY, barW, barH,
+             g_config.show_percent);
   }
 
   [img unlockFocus];
@@ -753,7 +826,7 @@ static NSImage *drawSparklineChart(double *history, int count, NSColor *color,
   CGFloat chartW = w - padL - padR;
   CGFloat chartH = h - padT - padB;
 
-  // Transparent background — no fill
+  // Transparent background
 
   double maxVal = 100.0;
 
@@ -843,14 +916,14 @@ static NSString *formatThroughput(double bps) {
 // ---- Persist config back to Go ----
 
 static void persistConfig(void) {
-  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
-                 ^{
-                   GoSaveMenuBarConfig(g_config.show_cpu, g_config.show_gpu,
-                                       g_config.show_ane, g_config.show_memory,
-                                       g_config.show_power, g_config.cpu_color,
-                                       g_config.gpu_color, g_config.ane_color,
-                                       g_config.mem_color);
-                 });
+  dispatch_async(
+      dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        GoSaveMenuBarConfig(
+            g_config.status_bar_width, g_config.show_cpu, g_config.show_gpu,
+            g_config.show_ane, g_config.show_memory, g_config.show_power,
+            g_config.show_percent, g_config.cpu_color, g_config.gpu_color,
+            g_config.ane_color, g_config.mem_color);
+      });
 }
 
 // ---- Lifecycle ----
@@ -887,67 +960,67 @@ static void buildMenu(void) {
 
     // --- CPU ---
     [menu addItem:makeHeaderItem(@"CPU")];
-    g_delegate.cpuUsageItem = makeMetricItem(@"  Usage:     ", @"\u2014");
+    g_delegate.cpuUsageItem = makeMetricItem(@"Usage:", @"\u2014");
     [menu addItem:g_delegate.cpuUsageItem];
-    g_delegate.cpuEClusterItem = makeMetricItem(@"  E-Cluster: ", @"\u2014");
+    g_delegate.cpuEClusterItem = makeMetricItem(@"E-Cluster:", @"\u2014");
     [menu addItem:g_delegate.cpuEClusterItem];
-    g_delegate.cpuPClusterItem = makeMetricItem(@"  P-Cluster: ", @"\u2014");
+    g_delegate.cpuPClusterItem = makeMetricItem(@"P-Cluster:", @"\u2014");
     [menu addItem:g_delegate.cpuPClusterItem];
-    g_delegate.cpuWattsItem = makeMetricItem(@"  Power:     ", @"\u2014");
+    g_delegate.cpuWattsItem = makeMetricItem(@"Power:", @"\u2014");
     [menu addItem:g_delegate.cpuWattsItem];
-    g_delegate.cpuTempItem = makeMetricItem(@"  Temp:      ", @"\u2014");
+    g_delegate.cpuTempItem = makeMetricItem(@"Temp:", @"\u2014");
     [menu addItem:g_delegate.cpuTempItem];
     [menu addItem:[NSMenuItem separatorItem]];
 
     // --- GPU ---
     [menu addItem:makeHeaderItem(@"GPU")];
-    g_delegate.gpuUsageItem = makeMetricItem(@"  Usage:     ", @"\u2014");
+    g_delegate.gpuUsageItem = makeMetricItem(@"Usage:", @"\u2014");
     [menu addItem:g_delegate.gpuUsageItem];
-    g_delegate.gpuWattsItem = makeMetricItem(@"  Power:     ", @"\u2014");
+    g_delegate.gpuWattsItem = makeMetricItem(@"Power:", @"\u2014");
     [menu addItem:g_delegate.gpuWattsItem];
-    g_delegate.gpuTflopsItem = makeMetricItem(@"  TFLOPs:    ", @"\u2014");
+    g_delegate.gpuTflopsItem = makeMetricItem(@"TFLOPs:", @"\u2014");
     [menu addItem:g_delegate.gpuTflopsItem];
-    g_delegate.gpuTempItem = makeMetricItem(@"  Temp:      ", @"\u2014");
+    g_delegate.gpuTempItem = makeMetricItem(@"Temp:", @"\u2014");
     [menu addItem:g_delegate.gpuTempItem];
     [menu addItem:[NSMenuItem separatorItem]];
 
     // --- Memory ---
     [menu addItem:makeHeaderItem(@"MEMORY")];
-    g_delegate.memUsageItem = makeMetricItem(@"  RAM:       ", @"\u2014");
+    g_delegate.memUsageItem = makeMetricItem(@"RAM:", @"\u2014");
     [menu addItem:g_delegate.memUsageItem];
-    g_delegate.memSwapItem = makeMetricItem(@"  Swap:      ", @"\u2014");
+    g_delegate.memSwapItem = makeMetricItem(@"Swap:", @"\u2014");
     [menu addItem:g_delegate.memSwapItem];
     [menu addItem:[NSMenuItem separatorItem]];
 
     // --- Network ---
     [menu addItem:makeHeaderItem(@"NETWORK")];
-    g_delegate.netItem = makeMetricItem(@"  ", @"\u2014");
+    g_delegate.netItem = makeMetricItem(@"Network:", @"\u2014");
     [menu addItem:g_delegate.netItem];
-    g_delegate.rdmaItem = makeMetricItem(@"  RDMA:    ", @"\u2014");
+    g_delegate.rdmaItem = makeMetricItem(@"RDMA:", @"\u2014");
     [menu addItem:g_delegate.rdmaItem];
     [menu addItem:[NSMenuItem separatorItem]];
 
     // --- Disk ---
     [menu addItem:makeHeaderItem(@"DISK")];
-    g_delegate.diskItem = makeMetricItem(@"  ", @"\u2014");
+    g_delegate.diskItem = makeMetricItem(@"Disk:", @"\u2014");
     [menu addItem:g_delegate.diskItem];
     [menu addItem:[NSMenuItem separatorItem]];
 
     // --- Power ---
     [menu addItem:makeHeaderItem(@"POWER")];
-    g_delegate.powerTotalItem = makeMetricItem(@"  Total:   ", @"\u2014");
+    g_delegate.powerTotalItem = makeMetricItem(@"Total:", @"\u2014");
     [menu addItem:g_delegate.powerTotalItem];
-    g_delegate.powerPackageItem = makeMetricItem(@"  System:  ", @"\u2014");
+    g_delegate.powerPackageItem = makeMetricItem(@"System:", @"\u2014");
     [menu addItem:g_delegate.powerPackageItem];
-    g_delegate.powerCpuItem = makeMetricItem(@"  CPU:     ", @"\u2014");
+    g_delegate.powerCpuItem = makeMetricItem(@"CPU:", @"\u2014");
     [menu addItem:g_delegate.powerCpuItem];
-    g_delegate.powerGpuItem = makeMetricItem(@"  GPU:     ", @"\u2014");
+    g_delegate.powerGpuItem = makeMetricItem(@"GPU:", @"\u2014");
     [menu addItem:g_delegate.powerGpuItem];
-    g_delegate.powerAneItem = makeMetricItem(@"  ANE:     ", @"\u2014");
+    g_delegate.powerAneItem = makeMetricItem(@"ANE:", @"\u2014");
     [menu addItem:g_delegate.powerAneItem];
-    g_delegate.powerDramItem = makeMetricItem(@"  DRAM:    ", @"\u2014");
+    g_delegate.powerDramItem = makeMetricItem(@"DRAM:", @"\u2014");
     [menu addItem:g_delegate.powerDramItem];
-    g_delegate.thermalItem = makeMetricItem(@"  Thermal: ", @"\u2014");
+    g_delegate.thermalItem = makeMetricItem(@"Thermal:", @"\u2014");
     [menu addItem:g_delegate.thermalItem];
     [menu addItem:[NSMenuItem separatorItem]];
 
@@ -1022,6 +1095,23 @@ static void buildMenu(void) {
 
     [settingsMenu addItem:[NSMenuItem separatorItem]];
 
+    // Width controls
+    NSMenuItem *widthUp =
+        [[NSMenuItem alloc] initWithTitle:@"Increase Bar Width (+)"
+                                   action:@selector(increaseBarWidth:)
+                            keyEquivalent:@"+"];
+    widthUp.target = g_delegate;
+    [settingsMenu addItem:widthUp];
+
+    NSMenuItem *widthDown =
+        [[NSMenuItem alloc] initWithTitle:@"Decrease Bar Width (-)"
+                                   action:@selector(decreaseBarWidth:)
+                            keyEquivalent:@"-"];
+    widthDown.target = g_delegate;
+    [settingsMenu addItem:widthDown];
+
+    [settingsMenu addItem:[NSMenuItem separatorItem]];
+
     NSMenuItem *powerToggle =
         [[NSMenuItem alloc] initWithTitle:@"Show Wattage"
                                    action:@selector(togglePower:)
@@ -1030,6 +1120,15 @@ static void buildMenu(void) {
     powerToggle.state =
         g_config.show_power ? NSControlStateValueOn : NSControlStateValueOff;
     [settingsMenu addItem:powerToggle];
+
+    NSMenuItem *percentToggle =
+        [[NSMenuItem alloc] initWithTitle:@"Show Percentages"
+                                   action:@selector(togglePercent:)
+                            keyEquivalent:@""];
+    percentToggle.target = g_delegate;
+    percentToggle.state =
+        g_config.show_percent ? NSControlStateValueOn : NSControlStateValueOff;
+    [settingsMenu addItem:percentToggle];
 
     [settingsMenu addItem:[NSMenuItem separatorItem]];
 

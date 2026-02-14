@@ -36,6 +36,7 @@ type MenuBarConfig struct {
 	ShowANE         *bool  `json:"show_ane,omitempty"`         // Show ANE bar in status bar (default: true)
 	ShowMemory      *bool  `json:"show_memory,omitempty"`      // Show Memory bar in status bar (default: true)
 	ShowPower       *bool  `json:"show_power,omitempty"`       // Show power watts text (default: true)
+	ShowPercent     *bool  `json:"show_percent,omitempty"`     // Show percentage text next to bars (default: false)
 	CPUColor        string `json:"cpu_color,omitempty"`        // Hex color for CPU bar (default: systemGreen)
 	GPUColor        string `json:"gpu_color,omitempty"`        // Hex color for GPU bar (default: systemCyan)
 	ANEColor        string `json:"ane_color,omitempty"`        // Hex color for ANE bar (default: systemPurple)
@@ -84,6 +85,9 @@ func loadMenuBarConfig() MenuBarConfig {
 		}
 		if m.ShowPower != nil {
 			cfg.ShowPower = m.ShowPower
+		}
+		if m.ShowPercent != nil {
+			cfg.ShowPercent = m.ShowPercent
 		}
 	}
 	return cfg

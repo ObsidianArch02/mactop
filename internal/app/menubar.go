@@ -50,6 +50,7 @@ typedef struct {
     int show_ane;
     int show_memory;
     int show_power;
+    int show_percent;
     char cpu_color[8];
     char gpu_color[8];
     char ane_color[8];
@@ -86,6 +87,7 @@ type MenuBarMetricsPayload struct {
 	CPUPercent     float64        `json:"cpu_percent"`
 	ThermalState   string         `json:"thermal_state"`
 	RDMAStatus     string         `json:"rdma_status"`
+	TotalPower     float64        `json:"total_power"`
 }
 
 // Cached values for TUI+menubar dual mode
@@ -129,6 +131,7 @@ func applyMenuBarConfig() {
 	ccfg.show_ane = boolToInt(mbCfg.ShowANE, 1)
 	ccfg.show_memory = boolToInt(mbCfg.ShowMemory, 0)
 	ccfg.show_power = boolToInt(mbCfg.ShowPower, 1)
+	ccfg.show_percent = boolToInt(mbCfg.ShowPercent, 0)
 	copyColorToCBuf(&ccfg.cpu_color, mbCfg.CPUColor)
 	copyColorToCBuf(&ccfg.gpu_color, mbCfg.GPUColor)
 	copyColorToCBuf(&ccfg.ane_color, mbCfg.ANEColor)
@@ -139,12 +142,16 @@ func applyMenuBarConfig() {
 // GoSaveMenuBarConfig is called from ObjC when settings change
 //
 //export GoSaveMenuBarConfig
-func GoSaveMenuBarConfig(showCPU, showGPU, showANE, showMem, showPower C.int,
+func GoSaveMenuBarConfig(statusBarWidth, showCPU, showGPU, showANE, showMem, showPower, showPercent C.int,
 	cpuHex, gpuHex, aneHex, memHex *C.char) {
 	if currentConfig.MenuBar == nil {
 		currentConfig.MenuBar = &MenuBarConfig{}
 	}
 	m := currentConfig.MenuBar
+
+	if statusBarWidth > 0 {
+		m.StatusBarWidth = int(statusBarWidth)
+	}
 	t, f := true, false
 	if showCPU != 0 {
 		m.ShowCPU = &t
@@ -171,6 +178,11 @@ func GoSaveMenuBarConfig(showCPU, showGPU, showANE, showMem, showPower C.int,
 	} else {
 		m.ShowPower = &f
 	}
+	if showPercent != 0 {
+		m.ShowPercent = &t
+	} else {
+		m.ShowPercent = &f
+	}
 	if cpuHex != nil {
 		m.CPUColor = C.GoString(cpuHex)
 	}
@@ -190,6 +202,9 @@ func GoSaveMenuBarConfig(showCPU, showGPU, showANE, showMem, showPower C.int,
 // It reads JSON metrics from stdin and updates the menu bar on the main thread.
 func startMenuBarWorker() {
 	runtime.LockOSThread()
+
+	// Load config in the worker process so defaults/persistence works
+	loadConfig()
 
 	// Initialize AppKit
 	if ret := C.initMenuBar(); ret != 0 {
@@ -239,7 +254,7 @@ func updateMenuBarFromPayload(p MenuBarMetricsPayload) {
 	cm.gpu_watts = C.double(p.GPUMetrics.Power)
 	cm.ane_watts = C.double(p.CPUMetrics.ANEW)
 	cm.dram_watts = C.double(p.CPUMetrics.DRAMW)
-	cm.package_watts = C.double(p.CPUMetrics.PackageW)
+	cm.package_watts = C.double(p.TotalPower)
 	cm.total_watts = C.double(p.CPUMetrics.PackageW)
 
 	cm.gpu_freq_mhz = C.int(p.GPUMetrics.FreqMHz)
@@ -345,6 +360,7 @@ func pushMenuBarMetricsToWorker(sm SocMetrics, cpuMetrics CPUMetrics, gpuMetrics
 		CPUPercent:     cpuPercent,
 		ThermalState:   thermalState,
 		RDMAStatus:     rdmaStatus,
+		TotalPower:     sm.TotalPower,
 	}
 
 	if err := menubarMetricsEncoder.Encode(payload); err != nil {
