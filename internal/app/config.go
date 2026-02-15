@@ -56,6 +56,14 @@ type AppConfig struct {
 	MenuBar       *MenuBarConfig     `json:"menubar,omitempty"`
 }
 
+// intOrDefault returns v if > 0, otherwise def.
+func intOrDefault(v, def int) int {
+	if v > 0 {
+		return v
+	}
+	return def
+}
+
 // loadMenuBarConfig returns the menu bar config with defaults applied
 func loadMenuBarConfig() MenuBarConfig {
 	cfg := MenuBarConfig{
@@ -66,44 +74,45 @@ func loadMenuBarConfig() MenuBarConfig {
 		FontSize:        10,
 		PowerFontSize:   11,
 	}
-	if currentConfig.MenuBar != nil {
-		m := currentConfig.MenuBar
-		if m.StatusBarWidth > 0 {
-			cfg.StatusBarWidth = m.StatusBarWidth
-		}
-		if m.StatusBarHeight > 0 {
-			cfg.StatusBarHeight = m.StatusBarHeight
-		}
-		if m.SparklineWidth > 0 {
-			cfg.SparklineWidth = m.SparklineWidth
-		}
-		if m.SparklineHeight > 0 {
-			cfg.SparklineHeight = m.SparklineHeight
-		}
-		if m.FontSize > 0 {
-			cfg.FontSize = m.FontSize
-		}
-		if m.PowerFontSize > 0 {
-			cfg.PowerFontSize = m.PowerFontSize
-		}
-		if m.ShowCPU != nil {
-			cfg.ShowCPU = m.ShowCPU
-		}
-		if m.ShowGPU != nil {
-			cfg.ShowGPU = m.ShowGPU
-		}
-		if m.ShowANE != nil {
-			cfg.ShowANE = m.ShowANE
-		}
-		if m.ShowMemory != nil {
-			cfg.ShowMemory = m.ShowMemory
-		}
-		if m.ShowPower != nil {
-			cfg.ShowPower = m.ShowPower
-		}
-		if m.ShowPercent != nil {
-			cfg.ShowPercent = m.ShowPercent
-		}
+	if currentConfig.MenuBar == nil {
+		return cfg
+	}
+	m := currentConfig.MenuBar
+	cfg.StatusBarWidth = intOrDefault(m.StatusBarWidth, cfg.StatusBarWidth)
+	cfg.StatusBarHeight = intOrDefault(m.StatusBarHeight, cfg.StatusBarHeight)
+	cfg.SparklineWidth = intOrDefault(m.SparklineWidth, cfg.SparklineWidth)
+	cfg.SparklineHeight = intOrDefault(m.SparklineHeight, cfg.SparklineHeight)
+	cfg.FontSize = intOrDefault(m.FontSize, cfg.FontSize)
+	cfg.PowerFontSize = intOrDefault(m.PowerFontSize, cfg.PowerFontSize)
+	if m.ShowCPU != nil {
+		cfg.ShowCPU = m.ShowCPU
+	}
+	if m.ShowGPU != nil {
+		cfg.ShowGPU = m.ShowGPU
+	}
+	if m.ShowANE != nil {
+		cfg.ShowANE = m.ShowANE
+	}
+	if m.ShowMemory != nil {
+		cfg.ShowMemory = m.ShowMemory
+	}
+	if m.ShowPower != nil {
+		cfg.ShowPower = m.ShowPower
+	}
+	if m.ShowPercent != nil {
+		cfg.ShowPercent = m.ShowPercent
+	}
+	if m.CPUColor != "" {
+		cfg.CPUColor = m.CPUColor
+	}
+	if m.GPUColor != "" {
+		cfg.GPUColor = m.GPUColor
+	}
+	if m.ANEColor != "" {
+		cfg.ANEColor = m.ANEColor
+	}
+	if m.MemColor != "" {
+		cfg.MemColor = m.MemColor
 	}
 	return cfg
 }
