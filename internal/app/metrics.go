@@ -258,9 +258,12 @@ func collectMetrics(done chan struct{}, cpumetricsChan chan CPUMetrics, gpumetri
 			return
 		}
 
-		// Push to menubar worker — use lastNetDiskMetrics to avoid dual sampling
+		// Push to menubar worker — snapshot net metrics under lock to avoid race
 		if menubar {
-			pushMenuBarMetricsToWorker(m, cpuMetrics, gpuMetrics, lastNetDiskMetrics, sysInfo, maxFP32TFLOPs, getAvgCPUPercent(), thermalStr, rdmaStat)
+			renderMutex.Lock()
+			nd := lastNetDiskMetrics
+			renderMutex.Unlock()
+			pushMenuBarMetricsToWorker(m, cpuMetrics, gpuMetrics, nd, sysInfo, maxFP32TFLOPs, getAvgCPUPercent(), thermalStr, rdmaStat)
 		}
 
 		elapsed := time.Since(start)
