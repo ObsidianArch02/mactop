@@ -188,7 +188,7 @@ static NSColor *headerColor(void) { return [NSColor whiteColor]; }
                        color:(NSColor *)color {
   CGFloat chartW = (CGFloat)g_config.sparkline_width;
   CGFloat width = chartW + 16;
-  CGFloat height = 22;
+  CGFloat height = 24;
   self = [super initWithFrame:NSMakeRect(0, 0, width, height)];
   if (self) {
     _label = [NSTextField labelWithString:text];
@@ -214,7 +214,7 @@ static NSColor *headerColor(void) { return [NSColor whiteColor]; }
 - (instancetype)initWithLabel:(NSString *)lbl value:(NSString *)val {
   CGFloat chartW = (CGFloat)g_config.sparkline_width;
   CGFloat width = chartW + 16;
-  CGFloat height = 22;
+  CGFloat height = 24;
   self = [super initWithFrame:NSMakeRect(0, 0, width, height)];
   if (self) {
     CGFloat halfW = (width - 16) / 2.0;
@@ -258,13 +258,15 @@ static NSColor *headerColor(void) { return [NSColor whiteColor]; }
 @implementation MactopImageView
 - (instancetype)initWithImage:(NSImage *)img {
   CGFloat insetX = 8;
+  CGFloat padY = 6; // vertical spacing between charts
   CGFloat chartW = (CGFloat)g_config.sparkline_width;
   CGFloat h = (CGFloat)g_config.sparkline_height;
   CGFloat totalW = chartW + insetX * 2;
-  self = [super initWithFrame:NSMakeRect(0, 0, totalW, h)];
+  CGFloat totalH = h + padY * 2;
+  self = [super initWithFrame:NSMakeRect(0, 0, totalW, totalH)];
   if (self) {
     _imageView =
-        [[NSImageView alloc] initWithFrame:NSMakeRect(insetX, 0, chartW, h)];
+        [[NSImageView alloc] initWithFrame:NSMakeRect(insetX, padY, chartW, h)];
     _imageView.imageScaling = NSImageScaleNone;
     _imageView.image = img;
     _imageView.autoresizingMask = NSViewNotSizable;
@@ -643,10 +645,10 @@ static MactopMenuBarDelegate *g_delegate = nil;
 
 // ---- Typography ----
 static NSFont *metricFont(void) {
-  return [NSFont monospacedDigitSystemFontOfSize:14 weight:NSFontWeightMedium];
+  return [NSFont monospacedDigitSystemFontOfSize:15 weight:NSFontWeightMedium];
 }
 static NSFont *headerFont(void) {
-  return [NSFont systemFontOfSize:14 weight:NSFontWeightHeavy];
+  return [NSFont systemFontOfSize:15 weight:NSFontWeightHeavy];
 }
 
 // Helpers
@@ -875,7 +877,7 @@ static NSImage *drawSparklineChart(double *history, int count, NSColor *color,
   CGFloat h = (CGFloat)g_config.sparkline_height;
   NSImage *img = [[NSImage alloc] initWithSize:NSMakeSize(w, h)];
   [img lockFocus];
-  CGFloat padL = 4, padR = 4, padT = 16, padB = 4;
+  CGFloat padL = 4, padR = 4, padT = 22, padB = 4;
   CGFloat chartW = w - padL - padR;
   CGFloat chartH = h - padT - padB;
   double maxVal = 100.0;
@@ -917,7 +919,7 @@ static NSImage *drawSparklineChart(double *history, int count, NSColor *color,
   }
   [color set];
   [linePath stroke];
-  NSFont *labelFont = [NSFont systemFontOfSize:13 weight:NSFontWeightBold];
+  NSFont *labelFont = [NSFont systemFontOfSize:14 weight:NSFontWeightBold];
   NSDictionary *labelAttrs = @{
     NSFontAttributeName : labelFont,
     NSForegroundColorAttributeName : color
@@ -926,7 +928,7 @@ static NSImage *drawSparklineChart(double *history, int count, NSColor *color,
       withAttributes:labelAttrs];
   NSString *valStr =
       valOverride ?: [NSString stringWithFormat:@"%.1f%%", currentVal];
-  NSFont *valFont = [NSFont monospacedDigitSystemFontOfSize:14
+  NSFont *valFont = [NSFont monospacedDigitSystemFontOfSize:15
                                                      weight:NSFontWeightBold];
   NSDictionary *valAttrs = @{
     NSFontAttributeName : valFont,
