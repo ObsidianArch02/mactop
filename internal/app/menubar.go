@@ -135,7 +135,6 @@ func applyMenuBarConfig() {
 	ccfg.show_ane = boolToInt(mbCfg.ShowANE, 1)
 	ccfg.show_memory = boolToInt(mbCfg.ShowMemory, 0)
 	ccfg.show_power = boolToInt(mbCfg.ShowPower, 1)
-	ccfg.show_power = boolToInt(mbCfg.ShowPower, 1)
 	ccfg.show_percent = boolToInt(mbCfg.ShowPercent, 0)
 	ccfg.font_size = C.int(mbCfg.FontSize)
 	ccfg.power_font_size = C.int(mbCfg.PowerFontSize)
@@ -155,7 +154,7 @@ func cBoolToPtr(v C.int) *bool {
 // GoSaveMenuBarConfig is called from ObjC when settings change
 //
 //export GoSaveMenuBarConfig
-func GoSaveMenuBarConfig(statusBarWidth, statusBarHeight, sparklineWidth, showCPU, showGPU, showANE, showMem, showPower, showPercent,
+func GoSaveMenuBarConfig(statusBarWidth, statusBarHeight, sparklineWidth, sparklineHeight, showCPU, showGPU, showANE, showMem, showPower, showPercent,
 	fontSize, powerFontSize C.int,
 	cpuHex, gpuHex, aneHex, memHex *C.char) {
 	if currentConfig.MenuBar == nil {
@@ -171,6 +170,9 @@ func GoSaveMenuBarConfig(statusBarWidth, statusBarHeight, sparklineWidth, showCP
 	}
 	if sparklineWidth > 0 {
 		m.SparklineWidth = int(sparklineWidth)
+	}
+	if sparklineHeight > 0 {
+		m.SparklineHeight = int(sparklineHeight)
 	}
 	m.ShowCPU = cBoolToPtr(showCPU)
 	m.ShowGPU = cBoolToPtr(showGPU)
@@ -207,7 +209,6 @@ func GoSaveMenuBarConfig(statusBarWidth, statusBarHeight, sparklineWidth, showCP
 func startMenuBarWorker() {
 	runtime.LockOSThread()
 
-	// Load config in the worker process so defaults/persistence works
 	// Load config in the worker process so defaults/persistence works
 	loadConfig()
 	applyMenuBarConfig()

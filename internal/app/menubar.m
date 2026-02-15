@@ -68,12 +68,12 @@ typedef struct {
 
 // Go callback for persisting settings
 extern void GoSaveMenuBarConfig(int statusBarWidth, int statusBarHeight,
-                                int sparklineWidth, int showCPU, int showGPU,
-                                int showANE, int showMem, int showPower,
-                                int showPercent, int fontSize,
-                                int powerFontSize, const char *cpuHex,
-                                const char *gpuHex, const char *aneHex,
-                                const char *memHex);
+                                int sparklineWidth, int sparklineHeight,
+                                int showCPU, int showGPU, int showANE,
+                                int showMem, int showPower, int showPercent,
+                                int fontSize, int powerFontSize,
+                                const char *cpuHex, const char *gpuHex,
+                                const char *aneHex, const char *memHex);
 
 // Global state
 static menubar_config_t g_config = {
@@ -957,11 +957,11 @@ static void persistConfig(void) {
       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         GoSaveMenuBarConfig(
             g_config.status_bar_width, g_config.status_bar_height,
-            g_config.sparkline_width, g_config.show_cpu, g_config.show_gpu,
-            g_config.show_ane, g_config.show_memory, g_config.show_power,
-            g_config.show_percent, g_config.font_size, g_config.power_font_size,
-            g_config.cpu_color, g_config.gpu_color, g_config.ane_color,
-            g_config.mem_color);
+            g_config.sparkline_width, g_config.sparkline_height,
+            g_config.show_cpu, g_config.show_gpu, g_config.show_ane,
+            g_config.show_memory, g_config.show_power, g_config.show_percent,
+            g_config.font_size, g_config.power_font_size, g_config.cpu_color,
+            g_config.gpu_color, g_config.ane_color, g_config.mem_color);
       });
 }
 
