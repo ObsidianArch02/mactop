@@ -469,9 +469,13 @@ func applyInitialTheme(colorName string, setColor bool) {
 // initializeTheme sets up all theming with priority: CLI flags > theme.json > saved config
 // Each property (foreground, background) is evaluated independently
 func initializeTheme(colorName string, setColor bool, interval int, setInterval bool) {
-	// Always apply interval if set (regardless of theme source)
+	// Interval priority: 1) CLI --interval, 2) saved config, 3) default 1000ms
 	if setInterval {
 		updateInterval = interval
+		currentConfig.Interval = interval
+		updateIntervalText()
+	} else if currentConfig.Interval > 0 {
+		updateInterval = currentConfig.Interval
 		updateIntervalText()
 	}
 

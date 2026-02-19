@@ -52,6 +52,7 @@ type AppConfig struct {
 	DefaultLayout string             `json:"default_layout"`
 	Theme         string             `json:"theme"`
 	Background    string             `json:"background,omitempty"`
+	Interval      int                `json:"interval,omitempty"`
 	SortColumn    *int               `json:"sort_column,omitempty"`
 	SortReverse   bool               `json:"sort_reverse"`
 	CustomTheme   *CustomThemeConfig `json:"custom_theme,omitempty"`

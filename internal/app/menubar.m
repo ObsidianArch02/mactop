@@ -1144,7 +1144,9 @@ void updateMenuBarMetrics(menubar_metrics_t *m) {
   NSValue *val = [NSValue valueWithBytes:&copy
                                 objCType:@encode(menubar_metrics_t)];
   dispatch_async(dispatch_get_main_queue(), ^{
-    [g_delegate performMetricUpdate:val];
+    @autoreleasepool {
+      [g_delegate performMetricUpdate:val];
+    }
   });
 }
 void pumpMenuBarEvents(void) {
@@ -1208,146 +1210,157 @@ void cleanupMenuBar(void) {
   [self doUpdate:&metrics];
 }
 - (void)doUpdate:(menubar_metrics_t *)mptr {
-  menubar_metrics_t metrics = *mptr;
-  pushHistory(cpuHistory, metrics.cpu_percent);
-  pushHistory(gpuHistory, metrics.gpu_percent);
-  pushHistory(aneHistory, metrics.ane_percent);
-  double memPct = 0;
-  if (metrics.mem_total_bytes > 0) {
-    memPct = (double)metrics.mem_used_bytes / (double)metrics.mem_total_bytes *
-             100.0;
-  }
-  pushHistory(memHistory, memPct);
+  @autoreleasepool {
+    menubar_metrics_t metrics = *mptr;
+    pushHistory(cpuHistory, metrics.cpu_percent);
+    pushHistory(gpuHistory, metrics.gpu_percent);
+    pushHistory(aneHistory, metrics.ane_percent);
+    double memPct = 0;
+    if (metrics.mem_total_bytes > 0) {
+      memPct = (double)metrics.mem_used_bytes /
+               (double)metrics.mem_total_bytes * 100.0;
+    }
+    pushHistory(memHistory, memPct);
 
-  self.statusItem.button.image =
-      drawStatusBarImage(metrics.cpu_percent, metrics.gpu_percent,
-                         metrics.ane_percent, memPct, metrics.total_watts);
+    self.statusItem.button.image =
+        drawStatusBarImage(metrics.cpu_percent, metrics.gpu_percent,
+                           metrics.ane_percent, memPct, metrics.total_watts);
 
-  // Clear title as it is now drawn in image
-  self.statusItem.button.title = @"";
+    // Clear title as it is now drawn in image
+    self.statusItem.button.title = @"";
 
-  // Update menu views...
-  MactopLabelView *mv = (MactopLabelView *)self.modelItem.view;
-  mv.label.stringValue =
-      [NSString stringWithFormat:@"%s  (%dE + %dP + %dGPU)", metrics.model_name,
-                                 metrics.e_core_count, metrics.p_core_count,
-                                 metrics.gpu_core_count];
+    // Update menu views...
+    MactopLabelView *mv = (MactopLabelView *)self.modelItem.view;
+    mv.label.stringValue = [NSString
+        stringWithFormat:@"%s  (%dE + %dP + %dGPU)", metrics.model_name,
+                         metrics.e_core_count, metrics.p_core_count,
+                         metrics.gpu_core_count];
 
-  MactopMetricView *v = (MactopMetricView *)self.cpuUsageItem.view;
-  [v setTwoToneLabel:@"Usage:"
-               value:[NSString
-                         stringWithFormat:@"%.1f%%", metrics.cpu_percent]];
-  v = (MactopMetricView *)self.cpuEClusterItem.view;
-  [v setTwoToneLabel:@"E-Cluster:"
-               value:[NSString stringWithFormat:@"%d MHz (%.1f%%)",
-                                                metrics.ecluster_freq_mhz,
-                                                metrics.ecluster_active]];
-  v = (MactopMetricView *)self.cpuPClusterItem.view;
-  [v setTwoToneLabel:@"P-Cluster:"
-               value:[NSString stringWithFormat:@"%d MHz (%.1f%%)",
-                                                metrics.pcluster_freq_mhz,
-                                                metrics.pcluster_active]];
-  v = (MactopMetricView *)self.cpuWattsItem.view;
-  [v setTwoToneLabel:@"Power:"
-               value:[NSString stringWithFormat:@"%.2f W", metrics.cpu_watts]];
-  v = (MactopMetricView *)self.cpuTempItem.view;
-  [v setTwoToneLabel:@"Temp:"
-               value:[NSString stringWithFormat:@"%.1f°C", metrics.cpu_temp]];
+    MactopMetricView *v = (MactopMetricView *)self.cpuUsageItem.view;
+    [v setTwoToneLabel:@"Usage:"
+                 value:[NSString
+                           stringWithFormat:@"%.1f%%", metrics.cpu_percent]];
+    v = (MactopMetricView *)self.cpuEClusterItem.view;
+    [v setTwoToneLabel:@"E-Cluster:"
+                 value:[NSString stringWithFormat:@"%d MHz (%.1f%%)",
+                                                  metrics.ecluster_freq_mhz,
+                                                  metrics.ecluster_active]];
+    v = (MactopMetricView *)self.cpuPClusterItem.view;
+    [v setTwoToneLabel:@"P-Cluster:"
+                 value:[NSString stringWithFormat:@"%d MHz (%.1f%%)",
+                                                  metrics.pcluster_freq_mhz,
+                                                  metrics.pcluster_active]];
+    v = (MactopMetricView *)self.cpuWattsItem.view;
+    [v setTwoToneLabel:@"Power:"
+                 value:[NSString
+                           stringWithFormat:@"%.2f W", metrics.cpu_watts]];
+    v = (MactopMetricView *)self.cpuTempItem.view;
+    [v setTwoToneLabel:@"Temp:"
+                 value:[NSString stringWithFormat:@"%.1f°C", metrics.cpu_temp]];
 
-  v = (MactopMetricView *)self.gpuUsageItem.view;
-  [v setTwoToneLabel:@"Usage:"
-               value:[NSString stringWithFormat:@"%.1f%% (%d MHz)",
-                                                metrics.gpu_percent,
-                                                metrics.gpu_freq_mhz]];
-  v = (MactopMetricView *)self.gpuWattsItem.view;
-  [v setTwoToneLabel:@"Power:"
-               value:[NSString stringWithFormat:@"%.2f W", metrics.gpu_watts]];
-  double activeTF = (metrics.gpu_percent / 100.0) * metrics.tflops_fp32;
-  v = (MactopMetricView *)self.gpuTflopsItem.view;
-  [v setTwoToneLabel:@"TFLOPs:"
-               value:[NSString stringWithFormat:@"%.2f / %.2f FP32", activeTF,
-                                                metrics.tflops_fp32]];
-  v = (MactopMetricView *)self.gpuTempItem.view;
-  [v setTwoToneLabel:@"Temp:"
-               value:[NSString stringWithFormat:@"%.1f°C", metrics.gpu_temp]];
+    v = (MactopMetricView *)self.gpuUsageItem.view;
+    [v setTwoToneLabel:@"Usage:"
+                 value:[NSString stringWithFormat:@"%.1f%% (%d MHz)",
+                                                  metrics.gpu_percent,
+                                                  metrics.gpu_freq_mhz]];
+    v = (MactopMetricView *)self.gpuWattsItem.view;
+    [v setTwoToneLabel:@"Power:"
+                 value:[NSString
+                           stringWithFormat:@"%.2f W", metrics.gpu_watts]];
+    double activeTF = (metrics.gpu_percent / 100.0) * metrics.tflops_fp32;
+    v = (MactopMetricView *)self.gpuTflopsItem.view;
+    [v setTwoToneLabel:@"TFLOPs:"
+                 value:[NSString stringWithFormat:@"%.2f / %.2f FP32", activeTF,
+                                                  metrics.tflops_fp32]];
+    v = (MactopMetricView *)self.gpuTempItem.view;
+    [v setTwoToneLabel:@"Temp:"
+                 value:[NSString stringWithFormat:@"%.1f°C", metrics.gpu_temp]];
 
-  double memUsedGB =
-      (double)metrics.mem_used_bytes / (1024.0 * 1024.0 * 1024.0);
-  double memTotalGB =
-      (double)metrics.mem_total_bytes / (1024.0 * 1024.0 * 1024.0);
-  v = (MactopMetricView *)self.memUsageItem.view;
-  [v setTwoToneLabel:@"RAM:"
-               value:[NSString stringWithFormat:@"%.1f / %.0f GB (%.1f%%)",
-                                                memUsedGB, memTotalGB, memPct]];
-  double swapUsedGB =
-      (double)metrics.swap_used_bytes / (1024.0 * 1024.0 * 1024.0);
-  double swapTotalGB =
-      (double)metrics.swap_total_bytes / (1024.0 * 1024.0 * 1024.0);
-  v = (MactopMetricView *)self.memSwapItem.view;
-  [v setTwoToneLabel:@"Swap:"
-               value:[NSString stringWithFormat:@"%.1f / %.1f GB", swapUsedGB,
-                                                swapTotalGB]];
+    double memUsedGB =
+        (double)metrics.mem_used_bytes / (1024.0 * 1024.0 * 1024.0);
+    double memTotalGB =
+        (double)metrics.mem_total_bytes / (1024.0 * 1024.0 * 1024.0);
+    v = (MactopMetricView *)self.memUsageItem.view;
+    [v setTwoToneLabel:@"RAM:"
+                 value:[NSString stringWithFormat:@"%.1f / %.0f GB (%.1f%%)",
+                                                  memUsedGB, memTotalGB,
+                                                  memPct]];
+    double swapUsedGB =
+        (double)metrics.swap_used_bytes / (1024.0 * 1024.0 * 1024.0);
+    double swapTotalGB =
+        (double)metrics.swap_total_bytes / (1024.0 * 1024.0 * 1024.0);
+    v = (MactopMetricView *)self.memSwapItem.view;
+    [v setTwoToneLabel:@"Swap:"
+                 value:[NSString stringWithFormat:@"%.1f / %.1f GB", swapUsedGB,
+                                                  swapTotalGB]];
 
-  v = (MactopMetricView *)self.netItem.view;
-  [v setTwoToneLabel:@"Network:"
-               value:[NSString
-                         stringWithFormat:@"↓ %@  ↑ %@",
-                                          formatThroughput(
-                                              metrics.net_in_bytes_per_sec),
-                                          formatThroughput(
-                                              metrics.net_out_bytes_per_sec)]];
-  v = (MactopMetricView *)self.rdmaItem.view;
-  [v setTwoToneLabel:@"RDMA:"
-               value:[NSString stringWithUTF8String:metrics.rdma_status]];
+    v = (MactopMetricView *)self.netItem.view;
+    [v setTwoToneLabel:@"Network:"
+                 value:[NSString
+                           stringWithFormat:@"↓ %@  ↑ %@",
+                                            formatThroughput(
+                                                metrics.net_in_bytes_per_sec),
+                                            formatThroughput(
+                                                metrics
+                                                    .net_out_bytes_per_sec)]];
+    v = (MactopMetricView *)self.rdmaItem.view;
+    [v setTwoToneLabel:@"RDMA:"
+                 value:[NSString stringWithUTF8String:metrics.rdma_status]];
 
-  v = (MactopMetricView *)self.diskItem.view;
-  [v setTwoToneLabel:@"Disk:"
-               value:[NSString stringWithFormat:@"R %.0f KB/s  W %.0f KB/s",
-                                                metrics.disk_read_kb_per_sec,
-                                                metrics.disk_write_kb_per_sec]];
+    v = (MactopMetricView *)self.diskItem.view;
+    [v setTwoToneLabel:@"Disk:"
+                 value:[NSString
+                           stringWithFormat:@"R %.0f KB/s  W %.0f KB/s",
+                                            metrics.disk_read_kb_per_sec,
+                                            metrics.disk_write_kb_per_sec]];
 
-  v = (MactopMetricView *)self.powerTotalItem.view;
-  [v setTwoToneLabel:@"Total:"
-               value:[NSString
-                         stringWithFormat:@"%.2f W", metrics.total_watts]];
-  v = (MactopMetricView *)self.powerPackageItem.view;
-  [v setTwoToneLabel:@"System:"
-               value:[NSString
-                         stringWithFormat:@"%.2f W", metrics.package_watts]];
-  v = (MactopMetricView *)self.powerCpuItem.view;
-  [v setTwoToneLabel:@"CPU:"
-               value:[NSString stringWithFormat:@"%.2f W", metrics.cpu_watts]];
-  v = (MactopMetricView *)self.powerGpuItem.view;
-  [v setTwoToneLabel:@"GPU:"
-               value:[NSString stringWithFormat:@"%.2f W", metrics.gpu_watts]];
-  v = (MactopMetricView *)self.powerAneItem.view;
-  [v setTwoToneLabel:@"ANE:"
-               value:[NSString stringWithFormat:@"%.2f W", metrics.ane_watts]];
-  v = (MactopMetricView *)self.powerDramItem.view;
-  [v setTwoToneLabel:@"DRAM:"
-               value:[NSString stringWithFormat:@"%.2f W", metrics.dram_watts]];
-  v = (MactopMetricView *)self.thermalItem.view;
-  [v setTwoToneLabel:@"Thermal:"
-               value:[NSString stringWithUTF8String:metrics.thermal_state]];
+    v = (MactopMetricView *)self.powerTotalItem.view;
+    [v setTwoToneLabel:@"Total:"
+                 value:[NSString
+                           stringWithFormat:@"%.2f W", metrics.total_watts]];
+    v = (MactopMetricView *)self.powerPackageItem.view;
+    [v setTwoToneLabel:@"System:"
+                 value:[NSString
+                           stringWithFormat:@"%.2f W", metrics.package_watts]];
+    v = (MactopMetricView *)self.powerCpuItem.view;
+    [v setTwoToneLabel:@"CPU:"
+                 value:[NSString
+                           stringWithFormat:@"%.2f W", metrics.cpu_watts]];
+    v = (MactopMetricView *)self.powerGpuItem.view;
+    [v setTwoToneLabel:@"GPU:"
+                 value:[NSString
+                           stringWithFormat:@"%.2f W", metrics.gpu_watts]];
+    v = (MactopMetricView *)self.powerAneItem.view;
+    [v setTwoToneLabel:@"ANE:"
+                 value:[NSString
+                           stringWithFormat:@"%.2f W", metrics.ane_watts]];
+    v = (MactopMetricView *)self.powerDramItem.view;
+    [v setTwoToneLabel:@"DRAM:"
+                 value:[NSString
+                           stringWithFormat:@"%.2f W", metrics.dram_watts]];
+    v = (MactopMetricView *)self.thermalItem.view;
+    [v setTwoToneLabel:@"Thermal:"
+                 value:[NSString stringWithUTF8String:metrics.thermal_state]];
 
-  // Sparklines
-  MactopImageView *iv = (MactopImageView *)self.cpuSparkItem.view;
-  iv.imageView.image =
-      drawSparklineChart(cpuHistory, SPARKLINE_HISTORY_SIZE, cpuColor(), @"CPU",
-                         metrics.cpu_percent, nil);
-  iv = (MactopImageView *)self.gpuSparkItem.view;
-  iv.imageView.image =
-      drawSparklineChart(gpuHistory, SPARKLINE_HISTORY_SIZE, gpuColor(), @"GPU",
-                         metrics.gpu_percent, nil);
-  iv = (MactopImageView *)self.aneSparkItem.view;
-  iv.imageView.image =
-      drawSparklineChart(aneHistory, SPARKLINE_HISTORY_SIZE, aneColor(), @"ANE",
-                         metrics.ane_percent, nil);
-  NSString *memValStr =
-      [NSString stringWithFormat:@"%.1f / %.0f GB", memUsedGB, memTotalGB];
-  iv = (MactopImageView *)self.memSparkItem.view;
-  iv.imageView.image =
-      drawSparklineChart(memHistory, SPARKLINE_HISTORY_SIZE, memColor(), @"MEM",
-                         memPct, memValStr);
+    // Sparklines
+    MactopImageView *iv = (MactopImageView *)self.cpuSparkItem.view;
+    iv.imageView.image =
+        drawSparklineChart(cpuHistory, SPARKLINE_HISTORY_SIZE, cpuColor(),
+                           @"CPU", metrics.cpu_percent, nil);
+    iv = (MactopImageView *)self.gpuSparkItem.view;
+    iv.imageView.image =
+        drawSparklineChart(gpuHistory, SPARKLINE_HISTORY_SIZE, gpuColor(),
+                           @"GPU", metrics.gpu_percent, nil);
+    iv = (MactopImageView *)self.aneSparkItem.view;
+    iv.imageView.image =
+        drawSparklineChart(aneHistory, SPARKLINE_HISTORY_SIZE, aneColor(),
+                           @"ANE", metrics.ane_percent, nil);
+    NSString *memValStr =
+        [NSString stringWithFormat:@"%.1f / %.0f GB", memUsedGB, memTotalGB];
+    iv = (MactopImageView *)self.memSparkItem.view;
+    iv.imageView.image =
+        drawSparklineChart(memHistory, SPARKLINE_HISTORY_SIZE, memColor(),
+                           @"MEM", memPct, memValStr);
+  } // @autoreleasepool
 }
 @end

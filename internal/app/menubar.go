@@ -75,6 +75,8 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sync"
+	"time"
 	"unsafe"
 )
 
@@ -100,6 +102,8 @@ var (
 	menubarMetricsEncoder *json.Encoder
 	menubarWorkerCmd      *exec.Cmd
 	menubarWorkerStdin    io.WriteCloser
+	menubarMu             sync.Mutex
+	menubarLastRestart    time.Time
 )
 
 func boolToInt(b *bool, defaultVal C.int) C.int {
@@ -222,7 +226,15 @@ func startMenuBarWorker() {
 	// We run the JSON decoder in a goroutine to feed updates.
 	go func() {
 		decoder := json.NewDecoder(os.Stdin)
+		gcTicker := time.NewTicker(5 * time.Minute)
+		defer gcTicker.Stop()
 		for {
+			select {
+			case <-gcTicker.C:
+				runtime.GC()
+			default:
+			}
+
 			var payload MenuBarMetricsPayload
 			if err := decoder.Decode(&payload); err != nil {
 				// If stdin closes (parent dies), exit the worker
@@ -353,7 +365,11 @@ func startMenuBarProcess() error {
 }
 
 // pushMenuBarMetricsToWorker sends metrics to the child process.
+// If the worker has died, it automatically restarts with a 2s cooldown.
 func pushMenuBarMetricsToWorker(sm SocMetrics, cpuMetrics CPUMetrics, gpuMetrics GPUMetrics, netDisk NetDiskMetrics, sysInfo SystemInfo, maxFP32TFLOPs float64, cpuPercent float64, thermalState string, rdmaStatus string) {
+	menubarMu.Lock()
+	defer menubarMu.Unlock()
+
 	if menubarMetricsEncoder == nil {
 		return
 	}
@@ -372,6 +388,24 @@ func pushMenuBarMetricsToWorker(sm SocMetrics, cpuMetrics CPUMetrics, gpuMetrics
 	}
 
 	if err := menubarMetricsEncoder.Encode(payload); err != nil {
-		// Worker likely died, ignore
+		// Worker likely died — attempt restart with cooldown
+		if time.Since(menubarLastRestart) < 2*time.Second {
+			return // Too soon, skip this cycle
+		}
+		stderrLogger.Printf("Menubar worker pipe broken, restarting: %v\n", err)
+		menubarLastRestart = time.Now()
+
+		// Clean up old resources
+		if menubarWorkerStdin != nil {
+			menubarWorkerStdin.Close()
+		}
+		if menubarWorkerCmd != nil && menubarWorkerCmd.Process != nil {
+			menubarWorkerCmd.Process.Kill()
+		}
+		menubarMetricsEncoder = nil
+
+		if restartErr := startMenuBarProcess(); restartErr != nil {
+			stderrLogger.Printf("Failed to restart menubar worker: %v\n", restartErr)
+		}
 	}
 }
