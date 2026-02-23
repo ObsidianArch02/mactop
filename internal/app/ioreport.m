@@ -343,6 +343,7 @@ int initIOReport() {
   CFStringRef energyGroup = CFSTR("Energy Model");
   CFStringRef gpuGroup = CFSTR("GPU Stats");
   CFStringRef cpuGroup = CFSTR("CPU Stats");
+  CFStringRef amcGroup = CFSTR("AMC Stats");
 
   CFDictionaryRef energyChan =
       IOReportCopyChannelsInGroup(energyGroup, NULL, 0, 0, 0);
@@ -363,6 +364,13 @@ int initIOReport() {
   if (cpuChan != NULL) {
     IOReportMergeChannels(energyChan, cpuChan, NULL);
     CFRelease(cpuChan);
+  }
+
+  CFDictionaryRef amcChan =
+      IOReportCopyChannelsInGroup(amcGroup, NULL, 0, 0, 0);
+  if (amcChan != NULL) {
+    IOReportMergeChannels(energyChan, amcChan, NULL);
+    CFRelease(amcChan);
   }
 
   CFIndex size = CFDictionaryGetCount(energyChan);
@@ -519,6 +527,8 @@ typedef struct {
   float socTemp;
   float cpuTemp;
   float gpuTemp;
+  int64_t dramReadBytes;
+  int64_t dramWriteBytes;
 } PowerMetrics;
 
 static int cfStringMatch(CFStringRef str, const char *match) {
@@ -926,6 +936,20 @@ PowerMetrics samplePowerMetrics(int durationMs) {
               metrics.pClusterFreqMHz = avgFreq;
             }
           }
+        }
+      }
+    } else if (cfStringMatch(groupRef, "AMC Stats")) {
+      // Sum memory bandwidth from non-DCS channels to avoid double counting.
+      // DCS (DRAM Command Scheduler) channels are a subset of the total.
+      char channelName[256] = {0};
+      CFStringGetCString(channelRef, channelName, sizeof(channelName),
+                         kCFStringEncodingUTF8);
+      if (strstr(channelName, "DCS") == NULL) {
+        int64_t val = IOReportSimpleGetIntegerValue(item, 0);
+        if (strstr(channelName, "RD") != NULL) {
+          metrics.dramReadBytes += val;
+        } else if (strstr(channelName, "WR") != NULL) {
+          metrics.dramWriteBytes += val;
         }
       }
     }

@@ -57,6 +57,8 @@ typedef struct {
     float socTemp;
     float cpuTemp;
     float gpuTemp;
+    int64_t dramReadBytes;
+    int64_t dramWriteBytes;
 } PowerMetrics;
 
 int initIOReport();
@@ -97,6 +99,9 @@ type SocMetrics struct {
 	SocTemp         float32 `json:"soc_temp"`
 	CPUTemp         float32 `json:"cpu_temp"`
 	GPUTemp         float32 `json:"gpu_temp"`
+	DRAMReadBW      float64 `json:"dram_read_bw_gbs"`
+	DRAMWriteBW     float64 `json:"dram_write_bw_gbs"`
+	DRAMBWCombined  float64 `json:"dram_bw_combined_gbs"`
 }
 
 func initSocMetrics() error {
@@ -125,6 +130,9 @@ func sampleSocMetrics(durationMs int) SocMetrics {
 		SocTemp:         float32(pm.socTemp),
 		CPUTemp:         float32(pm.cpuTemp),
 		GPUTemp:         float32(pm.gpuTemp),
+		DRAMReadBW:      float64(pm.dramReadBytes) / float64(durationMs) * 1000.0 / 1e9,
+		DRAMWriteBW:     float64(pm.dramWriteBytes) / float64(durationMs) * 1000.0 / 1e9,
+		DRAMBWCombined:  float64(pm.dramReadBytes+pm.dramWriteBytes) / float64(durationMs) * 1000.0 / 1e9,
 	}
 }
 

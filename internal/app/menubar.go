@@ -39,6 +39,7 @@ typedef struct {
     double disk_write_kb_per_sec;
     double tflops_fp32;
     char rdma_status[64];
+    double dram_bw_combined_gbs;
 } menubar_metrics_t;
 
 typedef struct {
@@ -295,6 +296,9 @@ func updateMenuBarFromPayload(p MenuBarMetricsPayload) {
 
 	// TFLOPs
 	cm.tflops_fp32 = C.double(p.TFLOPs)
+
+	// DRAM Bandwidth
+	cm.dram_bw_combined_gbs = C.double(p.CPUMetrics.DRAMBWCombined)
 
 	// SysInfo Mapping
 	cm.gpu_core_count = C.int(p.SysInfo.GPUCoreCount)

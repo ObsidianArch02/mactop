@@ -44,6 +44,7 @@ typedef struct {
   double disk_write_kb_per_sec;
   double tflops_fp32;
   char rdma_status[64];
+  double dram_bw_combined_gbs;
 } menubar_metrics_t;
 
 // Config passed from Go
@@ -166,11 +167,9 @@ static NSColor *memColor(void) {
   return c ?: [NSColor systemPurpleColor];
 }
 
-static NSColor *labelDimColor(void) {
-  return [NSColor colorWithWhite:0.55 alpha:1.0];
-}
-static NSColor *valueColor(void) { return [NSColor whiteColor]; }
-static NSColor *headerColor(void) { return [NSColor whiteColor]; }
+static NSColor *labelDimColor(void) { return [NSColor secondaryLabelColor]; }
+static NSColor *valueColor(void) { return [NSColor labelColor]; }
+static NSColor *headerColor(void) { return [NSColor labelColor]; }
 
 // ---- Settings Window Controller & Delegate Forward Declarations ----
 
@@ -294,6 +293,7 @@ static NSColor *headerColor(void) { return [NSColor whiteColor]; }
 @property(strong, nonatomic) NSMenuItem *gpuTflopsItem;
 @property(strong, nonatomic) NSMenuItem *memUsageItem;
 @property(strong, nonatomic) NSMenuItem *memSwapItem;
+@property(strong, nonatomic) NSMenuItem *dramBwItem;
 @property(strong, nonatomic) NSMenuItem *netItem;
 @property(strong, nonatomic) NSMenuItem *rdmaItem;
 @property(strong, nonatomic) NSMenuItem *diskItem;
@@ -705,7 +705,7 @@ static NSMenuItem *makeBrandingItem(void) {
                                            systemFontOfSize:14
                                                      weight:NSFontWeightHeavy],
                                        NSForegroundColorAttributeName :
-                                           [NSColor whiteColor],
+                                           [NSColor labelColor],
                                        NSParagraphStyleAttributeName : style
                                      }]];
   field.attributedStringValue = as;
@@ -730,7 +730,7 @@ static void drawHBar(NSString *label, double pct, NSColor *color, CGFloat x,
                                                 weight:NSFontWeightBold];
   NSDictionary *la = @{
     NSFontAttributeName : lf,
-    NSForegroundColorAttributeName : [NSColor whiteColor]
+    NSForegroundColorAttributeName : [NSColor labelColor]
   };
   NSSize ls = [label sizeWithAttributes:la];
   CGFloat labelW = ls.width + 4;
@@ -741,7 +741,7 @@ static void drawHBar(NSString *label, double pct, NSColor *color, CGFloat x,
 
   CGFloat bx = x + labelW;
 
-  [[NSColor colorWithWhite:1.0 alpha:0.15] set];
+  [[NSColor colorWithWhite:0.5 alpha:0.2] set];
   NSBezierPath *track =
       [NSBezierPath bezierPathWithRoundedRect:NSMakeRect(bx, barY, barW, barH)
                                       xRadius:2
@@ -762,7 +762,7 @@ static void drawHBar(NSString *label, double pct, NSColor *color, CGFloat x,
                                                   weight:NSFontWeightRegular];
     NSDictionary *pa = @{
       NSFontAttributeName : pf,
-      NSForegroundColorAttributeName : [NSColor whiteColor]
+      NSForegroundColorAttributeName : [NSColor labelColor]
     };
     NSString *pStr = [NSString stringWithFormat:@"%.0f%%", pct];
     CGFloat px = bx + barW + 4;
@@ -818,7 +818,7 @@ static NSImage *drawStatusBarImage(double cpu, double gpu, double ane,
                                                   weight:NSFontWeightMedium];
     wattAttrs = @{
       NSFontAttributeName : pf,
-      NSForegroundColorAttributeName : [NSColor whiteColor]
+      NSForegroundColorAttributeName : [NSColor labelColor]
     };
     textW = [wattStr sizeWithAttributes:wattAttrs].width;
   }
@@ -932,7 +932,7 @@ static NSImage *drawSparklineChart(double *history, int count, NSColor *color,
                                                      weight:NSFontWeightBold];
   NSDictionary *valAttrs = @{
     NSFontAttributeName : valFont,
-    NSForegroundColorAttributeName : [NSColor whiteColor]
+    NSForegroundColorAttributeName : [NSColor labelColor]
   };
   NSSize valSize = [valStr sizeWithAttributes:valAttrs];
   [valStr drawAtPoint:NSMakePoint(w - padR - valSize.width - 2, h - padT + 2)
@@ -1030,6 +1030,8 @@ static void buildMenu(void) {
     [menu addItem:g_delegate.memUsageItem];
     g_delegate.memSwapItem = makeMetricItem(@"Swap:", @"\u2014");
     [menu addItem:g_delegate.memSwapItem];
+    g_delegate.dramBwItem = makeMetricItem(@"DRAM BW:", @"\u2014");
+    [menu addItem:g_delegate.dramBwItem];
     [menu addItem:[NSMenuItem separatorItem]];
 
     [menu addItem:makeHeaderItem(@"NETWORK")];
@@ -1293,6 +1295,11 @@ void cleanupMenuBar(void) {
     [v setTwoToneLabel:@"Swap:"
                  value:[NSString stringWithFormat:@"%.1f / %.1f GB", swapUsedGB,
                                                   swapTotalGB]];
+    v = (MactopMetricView *)self.dramBwItem.view;
+    [v setTwoToneLabel:@"DRAM BW:"
+                 value:[NSString
+                           stringWithFormat:@"%.1f GB/s",
+                                            metrics.dram_bw_combined_gbs]];
 
     v = (MactopMetricView *)self.netItem.view;
     [v setTwoToneLabel:@"Network:"

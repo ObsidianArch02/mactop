@@ -245,6 +245,9 @@ func collectMetrics(done chan struct{}, cpumetricsChan chan CPUMetrics, gpumetri
 			PClusterActive:  int(m.PClusterActive),
 			EClusterFreqMHz: int(m.EClusterFreqMHz),
 			PClusterFreqMHz: int(m.PClusterFreqMHz),
+			DRAMReadBW:      m.DRAMReadBW,
+			DRAMWriteBW:     m.DRAMWriteBW,
+			DRAMBWCombined:  m.DRAMBWCombined,
 		}
 
 		gpuMetrics := GPUMetrics{

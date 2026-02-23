@@ -81,6 +81,7 @@ func buildInfoLines(themeColor string) []string {
 		formatLine("Thermals", thermalStr),
 		formatLine("Network", fmt.Sprintf("↑ %s/s ↓ %s/s", formatBytes(lastNetDiskMetrics.OutBytesPerSec, networkUnit), formatBytes(lastNetDiskMetrics.InBytesPerSec, networkUnit))),
 		formatLine("Disk", fmt.Sprintf("R %s/s W %s/s", formatBytes(lastNetDiskMetrics.ReadKBytesPerSec*1024, diskUnit), formatBytes(lastNetDiskMetrics.WriteKBytesPerSec*1024, diskUnit))),
+		formatLine("DRAM BW", fmt.Sprintf("R %.1f / W %.1f / %.1f GB/s", lastCPUMetrics.DRAMReadBW, lastCPUMetrics.DRAMWriteBW, lastCPUMetrics.DRAMBWCombined)),
 	}
 
 	infoLines = append(infoLines, buildNetworkLinkLines(formatLine)...)

@@ -24,6 +24,9 @@ type CPUMetrics struct {
 	Throttled                                                        bool
 	CPUTemp                                                          float64
 	GPUTemp                                                          float64
+	DRAMReadBW                                                       float64
+	DRAMWriteBW                                                      float64
+	DRAMBWCombined                                                   float64
 }
 
 type SystemInfo struct {
