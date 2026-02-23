@@ -752,7 +752,7 @@ static float readSocTemperature(float *outCpuTemp, float *outGpuTemp) {
 }
 
 PowerMetrics samplePowerMetrics(int durationMs) {
-  PowerMetrics metrics = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  PowerMetrics metrics = {0};
 
   if (g_subscription == NULL || g_channels == NULL) {
     if (initIOReport() != 0) {
