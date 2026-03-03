@@ -888,6 +888,11 @@ func updateCPUGaugeTitles(totalUsage float64, cpuMetrics CPUMetrics) {
 
 func updatePowerChartText(cpuMetrics CPUMetrics, thermalStr string) {
 	PowerChart.Title = "Power Usage"
+
+	// Get uptime
+	uptimeSeconds, _ := GetNativeUptime()
+	uptimeStr := formatTime(float64(uptimeSeconds))
+
 	if isCompactLayout() {
 		PowerChart.Title = "Power"
 		PowerChart.Text = fmt.Sprintf("C:%.1fW G:%.1fW\nA:%.1fW D:%.1fW\nTot:%.1fW %s",
@@ -899,7 +904,7 @@ func updatePowerChartText(cpuMetrics CPUMetrics, thermalStr string) {
 			thermalStr,
 		)
 	} else {
-		PowerChart.Text = fmt.Sprintf("CPU: %.2f W | GPU: %.2f W\nANE: %.2f W | DRAM: %.2f W\nSystem: %.2f W\nTotal: %.2f W\nThermals: %s",
+		PowerChart.Text = fmt.Sprintf("CPU: %.2f W | GPU: %.2f W\nANE: %.2f W | DRAM: %.2f W\nSystem: %.2f W\nTotal: %.2f W\nThermals: %s\nUptime: %s",
 			cpuMetrics.CPUW,
 			cpuMetrics.GPUW+cpuMetrics.GPUSRAMW,
 			cpuMetrics.ANEW,
@@ -907,6 +912,7 @@ func updatePowerChartText(cpuMetrics CPUMetrics, thermalStr string) {
 			cpuMetrics.SystemW,
 			cpuMetrics.PackageW,
 			thermalStr,
+			uptimeStr,
 		)
 	}
 }
