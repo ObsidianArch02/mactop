@@ -41,13 +41,31 @@ func StderrToLogfile(logfile *os.File) {
 func parseTimeString(timeStr string) float64 {
 	var days, hours, minutes, seconds int
 
-	n, err := fmt.Sscanf(timeStr, "%dd%d:%d:%d", &days, &hours, &minutes, &seconds)
-	if n != 4 || err != nil {
-		return 0.0
+	// Try full format first: "01d02h30m45s"
+	n, err := fmt.Sscanf(timeStr, "%dd%dh%dm%ds", &days, &hours, &minutes, &seconds)
+	if n == 4 && err == nil {
+		return float64(days*86400) + float64(hours*3600) + float64(minutes*60) + float64(seconds)
 	}
 
-	totalSeconds := float64(days*86400) + float64(hours*3600) + float64(minutes*60) + float64(seconds)
-	return totalSeconds
+	// Try without days: "02h30m45s"
+	n, err = fmt.Sscanf(timeStr, "%dh%dm%ds", &hours, &minutes, &seconds)
+	if n == 3 && err == nil {
+		return float64(hours*3600) + float64(minutes*60) + float64(seconds)
+	}
+
+	// Try without days and hours: "30m45s"
+	n, err = fmt.Sscanf(timeStr, "%dm%ds", &minutes, &seconds)
+	if n == 2 && err == nil {
+		return float64(minutes*60) + float64(seconds)
+	}
+
+	// Try seconds only: "45s"
+	n, err = fmt.Sscanf(timeStr, "%ds", &seconds)
+	if n == 1 && err == nil {
+		return float64(seconds)
+	}
+
+	return 0.0
 }
 
 func formatTime(seconds float64) string {
@@ -56,7 +74,14 @@ func formatTime(seconds float64) string {
 	minutes := (int(seconds) / 60) % 60
 	secs := int(seconds) % 60
 
-	return fmt.Sprintf("%02dd%02dh%02dm%02ds", days, hours, minutes, secs)
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%dd%02dh%02dm%02ds", days, hours, minutes, secs)
+	case hours > 0:
+		return fmt.Sprintf("%dh%02dm%02ds", hours, minutes, secs)
+	default:
+		return fmt.Sprintf("%dm%02ds", minutes, secs)
+	}
 }
 
 func formatMemorySize(kb int64) string {
