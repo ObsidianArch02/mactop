@@ -66,6 +66,7 @@ var (
 	headlessCount  int
 	headlessFormat string
 	menubar        bool   // Run as menu bar status item
+	filterPID      int    // Monitor a specific process by PID (0 = all)
 	cliBgColor     string // Background color from --bg flag
 	interruptChan  = make(chan struct{}, 10)
 

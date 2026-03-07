@@ -90,6 +90,8 @@ func getProcessListTitle() (string, ui.Style) {
 		return fmt.Sprintf(" Search: %s_ (Esc to clear) ", searchText), ui.NewStyle(titleColor, CurrentBgColor, ui.ModifierBold)
 	} else if isFrozen {
 		return " Process List [FROZEN] (f to resume) ", ui.NewStyle(titleColor, CurrentBgColor, ui.ModifierBold)
+	} else if filterPID > 0 {
+		return fmt.Sprintf(" Process List [PID %d] (↑/↓ scroll, / search, f freeze, F9 kill) ", filterPID), ui.NewStyle(titleColor, CurrentBgColor, ui.ModifierBold)
 	}
 	return "Process List (↑/↓ scroll, / search, f freeze, F9 kill)", ui.NewStyle(titleColor, CurrentBgColor)
 }

@@ -303,6 +303,7 @@ func updateHelpText() {
 			"--unit-temp: Temperature unit: celsius, fahrenheit (default: celsius)\n"+
 			"--foreground: Set the UI foreground color (named or hex, e.g., green, #9580FF)\n"+
 			"--bg: Set the UI background color (named or hex, e.g., mocha-base, #22212C)\n"+
+			"--pid: Monitor a specific process by PID (e.g., --pid 1234)\n"+
 			"--menubar: Run as a macOS menu bar status item (no TUI)\n\n"+
 			"Theme File: Create ~/.mactop/theme.json for custom colors:\n"+
 			"{\"foreground\": \"#9580FF\", \"background\": \"#22212C\"}\n\n",
@@ -586,6 +587,7 @@ func Run() {
 	flag.StringVar(&tempUnit, "unit-temp", "celsius", "Temperature unit: celsius, fahrenheit")
 	flag.BoolVar(&menubar, "menubar", false, "Run as a macOS menu bar status item (no TUI)")
 	flag.BoolVar(&menubarWorker, "menubar-worker", false, "Internal: Run as menu bar worker process")
+	flag.IntVar(&filterPID, "pid", 0, "Monitor a specific process by PID")
 
 	loadConfig()
 

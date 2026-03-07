@@ -155,15 +155,31 @@ func processOsProc(kp C.struct_kinfo_proc, now time.Time, prevProcessTimes map[i
 }
 
 func getProcessList(systemGpuPercent float64) ([]ProcessMetrics, error) {
-	mib := []C.int{C.CTL_KERN, C.KERN_PROC, C.KERN_PROC_ALL}
+	var mib []C.int
+	var mibLen C.u_int
+
+	if filterPID > 0 {
+		// Fetch only the specific process by PID
+		mib = []C.int{C.CTL_KERN, C.KERN_PROC, C.KERN_PROC_PID, C.int(filterPID)}
+		mibLen = 4
+	} else {
+		// Fetch all processes
+		mib = []C.int{C.CTL_KERN, C.KERN_PROC, C.KERN_PROC_ALL}
+		mibLen = 3
+	}
 	var size C.size_t
 
-	if _, err := C.sysctl(&mib[0], 3, nil, &size, nil, 0); err != nil {
+	if _, err := C.sysctl(&mib[0], mibLen, nil, &size, nil, 0); err != nil {
 		return nil, fmt.Errorf("sysctl size check failed: %v", err)
 	}
 
+	if size == 0 {
+		// PID not found or no processes
+		return nil, nil
+	}
+
 	buf := make([]byte, size)
-	if _, err := C.sysctl(&mib[0], 3, unsafe.Pointer(&buf[0]), &size, nil, 0); err != nil {
+	if _, err := C.sysctl(&mib[0], mibLen, unsafe.Pointer(&buf[0]), &size, nil, 0); err != nil {
 		return nil, fmt.Errorf("sysctl fetch failed: %v", err)
 	}
 
@@ -209,7 +225,7 @@ func getProcessList(systemGpuPercent float64) ([]ProcessMetrics, error) {
 		return processes[i].CPU > processes[j].CPU
 	})
 
-	if len(processes) > 500 {
+	if filterPID == 0 && len(processes) > 500 {
 		processes = processes[:500]
 	}
 

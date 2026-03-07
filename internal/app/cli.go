@@ -54,6 +54,8 @@ func handleFlag(arg string, idx int, args []string) (int, string, int, bool, boo
 		return handlePrometheusFlag(idx, args)
 	case "--interval", "-i":
 		return handleIntervalFlag(idx, args)
+	case "--pid":
+		return handlePIDFlag(idx, args)
 	case "--dump-ioreport", "-d":
 		fmt.Println("Dumping IOReport channels...")
 		DebugIOReport()
@@ -80,6 +82,7 @@ Options:
       --unit-network <unit> Network unit: auto, byte, kb, mb, gb (default: auto)
       --unit-disk <unit>    Disk unit: auto, byte, kb, mb, gb (default: auto)
       --unit-temp <unit>    Temperature unit: celsius, fahrenheit (default: celsius)
+      --pid <pid>         Monitor a specific process by PID
       --menubar           Run as a macOS menu bar status item (no TUI)
 
 Theme File:
@@ -140,6 +143,18 @@ func handleIntervalFlag(idx int, args []string) (int, string, int, bool, bool, e
 		return intervalResult(idx, interval).values()
 	}
 	return errorResult(idx, "Error: --interval flag requires an interval value").values()
+}
+
+func handlePIDFlag(idx int, args []string) (int, string, int, bool, bool, error) {
+	if idx+1 < len(args) {
+		pid, err := strconv.Atoi(args[idx+1])
+		if err != nil {
+			return errorResult(idx, fmt.Sprintf("Invalid PID: %v", err)).values()
+		}
+		filterPID = pid
+		return emptyResult(idx + 1).values()
+	}
+	return errorResult(idx, "Error: --pid flag requires a PID value").values()
 }
 
 func runTestApp() {
