@@ -66,6 +66,10 @@ func toggleFanLayout() {
 	renderMutex.Unlock()
 }
 
+// pendingFanTargets tracks the last-written target RPM per fan ID,
+// so rapid keypresses accumulate correctly between metric refreshes.
+var pendingFanTargets = make(map[int]int)
+
 const fanRPMStep = 100
 
 func handleFanSpeedAdjust(key string) {
@@ -80,13 +84,25 @@ func handleFanSpeedAdjust(key string) {
 		_ = SetFanForceTest(true)
 		_ = SetFanMode(fan.ID, 1) // forced mode
 
-		newRPM := fan.TargetRPM
-		if key == "+" || key == "=" {
-			newRPM += fanRPMStep
-		} else {
-			newRPM -= fanRPMStep
+		// Use pending target if available, otherwise fall back to last known
+		baseline, ok := pendingFanTargets[fan.ID]
+		if !ok {
+			baseline = fan.TargetRPM
 		}
-		_ = SetFanTarget(fan.ID, newRPM)
+		if key == "+" || key == "=" {
+			baseline += fanRPMStep
+		} else {
+			baseline -= fanRPMStep
+		}
+		// Clamp to fan min/max range
+		if baseline < fan.MinRPM {
+			baseline = fan.MinRPM
+		}
+		if baseline > fan.MaxRPM {
+			baseline = fan.MaxRPM
+		}
+		pendingFanTargets[fan.ID] = baseline
+		_ = SetFanTarget(fan.ID, baseline)
 	}
 	updateInfoUI()
 	w, h := ui.TerminalDimensions()
@@ -115,6 +131,10 @@ func handleFanAutoToggle() {
 	// Only disable force test if no fans remain in manual mode
 	if !anyManual {
 		_ = SetFanForceTest(false)
+		// Clear pending targets when returning to auto
+		for k := range pendingFanTargets {
+			delete(pendingFanTargets, k)
+		}
 	}
 	updateInfoUI()
 	w, h := ui.TerminalDimensions()
