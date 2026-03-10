@@ -101,14 +101,20 @@ func handleFanAutoToggle() {
 		return
 	}
 
+	anyManual := false
 	for _, fan := range lastCPUMetrics.Fans {
 		if fan.Mode == 0 {
+			// Switching to manual — enable force test first
 			_ = SetFanForceTest(true)
 			_ = SetFanMode(fan.ID, 1)
+			anyManual = true
 		} else {
 			_ = SetFanMode(fan.ID, 0)
-			_ = SetFanForceTest(false)
 		}
+	}
+	// Only disable force test if no fans remain in manual mode
+	if !anyManual {
+		_ = SetFanForceTest(false)
 	}
 	updateInfoUI()
 	w, h := ui.TerminalDimensions()

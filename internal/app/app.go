@@ -588,6 +588,9 @@ func seedInitialMetrics() {
 		PClusterFreqMHz: int(m.PClusterFreqMHz),
 		SClusterActive:  int(m.SClusterActive),
 		SClusterFreqMHz: int(m.SClusterFreqMHz),
+		DRAMReadBW:      m.DRAMReadBW,
+		DRAMWriteBW:     m.DRAMWriteBW,
+		DRAMBWCombined:  m.DRAMBWCombined,
 		Fans:            m.Fans,
 		TempSensors:     m.TempSensors,
 	}
