@@ -247,6 +247,6 @@ var (
 			Name: "mactop_system_info",
 			Help: "System information (value is always 1, labels contain info)",
 		},
-		[]string{"model", "core_count", "e_core_count", "p_core_count", "gpu_core_count"},
+		[]string{"model", "core_count", "e_core_count", "p_core_count", "s_core_count", "gpu_core_count"},
 	)
 )

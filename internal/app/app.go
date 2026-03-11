@@ -57,16 +57,18 @@ func setupUI() {
 	cachedSystemInfo = appleSiliconModel
 	eCoreCount := appleSiliconModel.ECoreCount
 	pCoreCount := appleSiliconModel.PCoreCount
+	sCoreCount := appleSiliconModel.SCoreCount
 	gpuCoreCount := appleSiliconModel.GPUCoreCount
 	updateModelText()
 	updateHelpText()
-	stderrLogger.Printf("Model: %s\nE-Core Count: %d\nP-Core Count: %d\nGPU Core Count: %d", modelName, eCoreCount, pCoreCount, gpuCoreCount)
+	stderrLogger.Printf("Model: %s\nE-Core Count: %d\nP-Core Count: %d\nS-Core Count: %d\nGPU Core Count: %d", modelName, eCoreCount, pCoreCount, sCoreCount, gpuCoreCount)
 
 	systemInfoGauge.With(prometheus.Labels{
 		"model":          modelName,
-		"core_count":     fmt.Sprintf("%d", eCoreCount+pCoreCount),
+		"core_count":     fmt.Sprintf("%d", eCoreCount+pCoreCount+sCoreCount),
 		"e_core_count":   fmt.Sprintf("%d", eCoreCount),
 		"p_core_count":   fmt.Sprintf("%d", pCoreCount),
+		"s_core_count":   fmt.Sprintf("%d", sCoreCount),
 		"gpu_core_count": fmt.Sprintf("%d", gpuCoreCount),
 	}).Set(1)
 
