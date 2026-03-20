@@ -16,6 +16,7 @@
 #include <sys/sysctl.h>
 #include <dlfcn.h>
 #include <unistd.h>
+#include <pthread.h>
 
 // Wi-Fi link info structure
 typedef struct {
@@ -564,6 +565,135 @@ static void readKperfDramBW(int64_t *readBytes, int64_t *writeBytes) {
   free(cur);
 }
 
+// Forward declarations for calibration function
+static int cfStringMatch(CFStringRef str, const char *cStr);
+static int cfStringStartsWith(CFStringRef str, const char *prefix);
+static double energyToWatts(int64_t energy, CFStringRef unitRef, double durationMs);
+
+// === Auto-calibration for DRAM power → bandwidth conversion ===
+// On M5+ chips where AMC Stats is kernel-blocked, we estimate DRAM BW from
+// DRAM power. The conversion factor (GB/s per watt) is chip-specific, so we
+// auto-calibrate at startup by running a brief known workload:
+//   1. Spawn 4 threads reading 256MB buffers (>> L2 cache → every read hits DRAM)
+//   2. Measure exact bytes read and DRAM power delta simultaneously
+//   3. Derive: g_dramGBsPerWatt = measured_throughput / measured_power_delta
+// This makes the formula accurate on ANY chip without hard-coding.
+static double g_dramGBsPerWatt = 25.1; // default fallback
+static double g_dramIdlePowerW = 0.3;  // DRAM idle/static power (leakage + refresh)
+static volatile int g_calib_running = 0;
+static volatile int64_t g_calib_bytes = 0;
+
+static void *calibThread(void *arg) {
+  size_t sz = 256ULL * 1024 * 1024; // 256MB per thread (>> L2 cache per core)
+  volatile char *buf = malloc(sz);
+  if (!buf) return NULL;
+  memset((void *)buf, 0xAB, sz);
+  int64_t localBytes = 0;
+  while (g_calib_running) {
+    volatile uint64_t sum = 0;
+    for (size_t i = 0; i < sz; i += 128)
+      sum += buf[i];
+    localBytes += sz;
+  }
+  __sync_fetch_and_add(&g_calib_bytes, localBytes);
+  free((void *)buf);
+  return NULL;
+}
+
+// Run auto-calibration. Called once at init when power-based DRAM BW is needed.
+// Takes ~2 seconds. Measures DRAM power during known workload to derive
+// the GB/s-per-watt constant for this specific chip.
+static void calibrateDramBwFromPower(void) {
+  if (g_channels == NULL || g_subscription == NULL)
+    return;
+
+  // Step 1: idle baseline (500ms)
+  CFDictionaryRef s1 = IOReportCreateSamples(g_subscription, g_channels, NULL);
+  usleep(500000);
+  CFDictionaryRef s2 = IOReportCreateSamples(g_subscription, g_channels, NULL);
+
+  double idleDramPower = 0;
+  if (s1 && s2) {
+    CFDictionaryRef delta = IOReportCreateSamplesDelta(s1, s2, NULL);
+    if (delta) {
+      CFArrayRef arr = CFDictionaryGetValue(delta, CFSTR("IOReportChannels"));
+      CFIndex cnt = arr ? CFArrayGetCount(arr) : 0;
+      for (CFIndex i = 0; i < cnt; i++) {
+        CFDictionaryRef ch = (CFDictionaryRef)CFArrayGetValueAtIndex(arr, i);
+        CFStringRef grp = IOReportChannelGetGroup(ch);
+        CFStringRef name = IOReportChannelGetChannelName(ch);
+        if (grp && name && cfStringMatch(grp, "Energy Model") &&
+            cfStringStartsWith(name, "DRAM")) {
+          int64_t val = IOReportSimpleGetIntegerValue(ch, 0);
+          CFStringRef unitRef = IOReportChannelGetUnitLabel(ch);
+          idleDramPower += energyToWatts(val, unitRef, 500.0);
+        }
+      }
+      CFRelease(delta);
+    }
+  }
+  if (s1) CFRelease(s1);
+  if (s2) CFRelease(s2);
+
+  // Step 2: run 4 threads for ~1.5 seconds, measure during 1 second
+  g_calib_bytes = 0;
+  g_calib_running = 1;
+  pthread_t threads[4];
+  for (int t = 0; t < 4; t++)
+    pthread_create(&threads[t], NULL, calibThread, NULL);
+
+  usleep(500000); // 500ms ramp — let DRAM frequency settle
+
+  // Reset counter, then measure for exactly 1 second
+  g_calib_bytes = 0;
+  s1 = IOReportCreateSamples(g_subscription, g_channels, NULL);
+  usleep(1000000); // 1 second measurement
+  s2 = IOReportCreateSamples(g_subscription, g_channels, NULL);
+  int64_t bytesRead = g_calib_bytes;
+
+  g_calib_running = 0;
+  for (int t = 0; t < 4; t++)
+    pthread_join(threads[t], NULL);
+
+  // Extract DRAM power during stress
+  double stressDramPower = 0;
+  if (s1 && s2) {
+    CFDictionaryRef delta = IOReportCreateSamplesDelta(s1, s2, NULL);
+    if (delta) {
+      CFArrayRef arr = CFDictionaryGetValue(delta, CFSTR("IOReportChannels"));
+      CFIndex cnt = arr ? CFArrayGetCount(arr) : 0;
+      for (CFIndex i = 0; i < cnt; i++) {
+        CFDictionaryRef ch = (CFDictionaryRef)CFArrayGetValueAtIndex(arr, i);
+        CFStringRef grp = IOReportChannelGetGroup(ch);
+        CFStringRef name = IOReportChannelGetChannelName(ch);
+        if (grp && name && cfStringMatch(grp, "Energy Model") &&
+            cfStringStartsWith(name, "DRAM")) {
+          int64_t val = IOReportSimpleGetIntegerValue(ch, 0);
+          CFStringRef unitRef = IOReportChannelGetUnitLabel(ch);
+          stressDramPower += energyToWatts(val, unitRef, 1000.0);
+        }
+      }
+      CFRelease(delta);
+    }
+  }
+  if (s1) CFRelease(s1);
+  if (s2) CFRelease(s2);
+
+  // Derive calibration constant
+  double deltaPower = stressDramPower - idleDramPower;
+  double throughputGBs = (double)bytesRead / 1e9; // GB in 1 second
+
+  if (deltaPower > 0.01 && throughputGBs > 1.0) {
+    g_dramGBsPerWatt = throughputGBs / deltaPower;
+    g_dramIdlePowerW = idleDramPower;
+    // Sanity check: should be between 5 and 500 GB/s per watt
+    if (g_dramGBsPerWatt < 5.0 || g_dramGBsPerWatt > 500.0) {
+      g_dramGBsPerWatt = 25.1; // fall back to default
+    }
+    if (g_dramIdlePowerW < 0) g_dramIdlePowerW = 0;
+  }
+}
+
 
 int initIOReport() {
   if (g_channels != NULL) {
@@ -643,6 +773,12 @@ int initIOReport() {
   // This configures PMU counters for L1D cache miss events.
   // Requires root; fails silently without root.
   initKperfDramBW();
+
+  // Auto-calibrate DRAM power → bandwidth conversion.
+  // Runs a brief ~2 second memory benchmark to derive the chip-specific
+  // GB/s-per-watt constant. Only needed on M5+ where AMC Stats is blocked.
+  // On M1-M4, AMC Stats provides direct byte counters so this is unused.
+  calibrateDramBwFromPower();
 
   return 0;
 }
@@ -1519,32 +1655,19 @@ PowerMetrics samplePowerMetrics(int durationMs) {
     metrics.dramWriteBytes = pmpDramWriteBytes;
   }
 
-  // Fallback: estimate DRAM BW from DRAM power (no root needed).
-  //
-  // This fallback only fires when BOTH AMC Stats AND PMP produce zero data:
-  //   - M1-M4 chips: AMC Stats works → this path is NOT reached
-  //   - A-series chips: PMP works → this path is NOT reached
-  //   - M5+ chips: AMC Stats is kernel-blocked → this path IS reached
-  //
-  // DRAM active power scales linearly with data transfer rate. The energy
-  // per byte transferred is a physical property of the DRAM technology:
-  //   LPDDR5X @ 9600 MT/s: ~35-40 pJ/byte (including I/O, refresh overhead)
-  //   → 1 Watt = 1 / 37.5e-12 bytes/sec ≈ 26.7 GB/s
-  //
-  // Empirically validated on M5 Max: 9.5W DRAM power ↔ 238 GB/s actual
-  // throughput (measured via kperf L1D miss hardware counters) → 25.1 GB/s/W.
-  // This applies to ALL M5-series chips (M5, M5 Pro, M5 Max, M5 Ultra)
-  // since they all use LPDDR5X-9600 — the energy/byte is technology-specific,
-  // not chip-specific. Different bus widths only affect max power/bandwidth,
-  // not the per-byte energy.
-  //
-  // Power cannot distinguish read vs write direction, so split evenly.
+  // Fallback: estimate DRAM BW from DRAM power (no root needed, M5+ only).
+  // DRAM power = static (leakage/refresh) + dynamic (data transfer).
+  // Only dynamic power correlates with bandwidth, so subtract idle baseline.
+  // BW = max(0, (current_power - idle_power)) × calibration_constant
+  // The calibration_constant is auto-derived at startup (see calibrateDramBwFromPower).
+  // This path only fires on M5+ where AMC Stats is kernel-blocked.
+  // On M1-M4/A-series, AMC Stats/PMP provides direct byte counters.
   if (metrics.dramReadBytes == 0 && metrics.dramWriteBytes == 0 &&
-      metrics.dramPower > 0.001) {
-    // Energy per byte for LPDDR5X-9600: ~37.5 pJ/byte (empirical: 39.8 pJ/byte)
-    // Calibration: 1W / 39.8e-12 bytes = 25.1 GB/s per watt
-    static const double kDramGBsPerWatt = 25.1;
-    double dramBwGBs = metrics.dramPower * kDramGBsPerWatt;
+      metrics.dramPower > g_dramIdlePowerW) {
+    // Subtract static/idle power — only dynamic power indicates data transfer
+    double activePower = metrics.dramPower - g_dramIdlePowerW;
+    if (activePower < 0) activePower = 0;
+    double dramBwGBs = activePower * g_dramGBsPerWatt;
     // Convert to bytes for this sample interval
     double sampleSec = (double)durationMs / 1000.0;
     int64_t totalBytes = (int64_t)(dramBwGBs * 1e9 * sampleSec);
