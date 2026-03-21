@@ -780,7 +780,44 @@ int initIOReport() {
   // Runs a brief ~2 second memory benchmark to derive the chip-specific
   // GB/s-per-watt constant. Only needed on M5+ where AMC Stats is blocked.
   // On M1-M4, AMC Stats provides direct byte counters so this is unused.
-  calibrateDramBwFromPower();
+  //
+  // Probe AMC Stats / PMP with a quick 100ms sample first to avoid the
+  // ~2 second calibration delay on chips that don't need it.
+  {
+    CFDictionaryRef probe1 = IOReportCreateSamples(g_subscription, g_channels, NULL);
+    usleep(100000); // 100ms probe
+    CFDictionaryRef probe2 = IOReportCreateSamples(g_subscription, g_channels, NULL);
+    int hasDirectBW = 0;
+    if (probe1 && probe2) {
+      CFDictionaryRef probeDelta = IOReportCreateSamplesDelta(probe1, probe2, NULL);
+      if (probeDelta) {
+        CFArrayRef arr = CFDictionaryGetValue(probeDelta, CFSTR("IOReportChannels"));
+        CFIndex cnt = arr ? CFArrayGetCount(arr) : 0;
+        for (CFIndex i = 0; i < cnt && !hasDirectBW; i++) {
+          CFDictionaryRef ch = (CFDictionaryRef)CFArrayGetValueAtIndex(arr, i);
+          CFStringRef grp = IOReportChannelGetGroup(ch);
+          if (!grp) continue;
+          if (cfStringMatch(grp, "AMC Stats") || cfStringMatch(grp, "PMP")) {
+            char name[256] = {0};
+            CFStringRef nameRef = IOReportChannelGetChannelName(ch);
+            if (nameRef)
+              CFStringGetCString(nameRef, name, sizeof(name), kCFStringEncodingUTF8);
+            if (strstr(name, "RD") || strstr(name, "WR")) {
+              int64_t val = IOReportSimpleGetIntegerValue(ch, 0);
+              if (val > 0) hasDirectBW = 1;
+            }
+          }
+        }
+        CFRelease(probeDelta);
+      }
+    }
+    if (probe1) CFRelease(probe1);
+    if (probe2) CFRelease(probe2);
+
+    if (!hasDirectBW) {
+      calibrateDramBwFromPower();
+    }
+  }
 
   return 0;
 }
