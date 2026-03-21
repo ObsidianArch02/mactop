@@ -5,48 +5,21 @@
 class Mactop < Formula
   desc "Apple Silicon Monitor Top written in Go Lang"
   homepage "https://github.com/metaspartan/mactop"
-  version "2.0.9"
+  version "2.1.0"
   depends_on :macos
 
   if Hardware::CPU.arm?
-    url "https://github.com/metaspartan/mactop/releases/download/v2.0.9/mactop_2.0.9_darwin_arm64.tar.gz"
-    sha256 "0b2d97547918df0a9edab84570c8177931eae2f99dff7fb1468d6241216f19fe"
+    url "https://github.com/metaspartan/mactop/releases/download/v2.1.0/mactop_2.1.0_darwin_arm64.tar.gz"
+    sha256 "6d262807ac84a2017d6b4b943413bb5aad321b4ff2e31b9f92d45fe2c12c4815"
 
-    def install
+    define_method(:install) do
       bin.install "mactop"
     end
-  end
-
-  def service
-    run [opt_bin/"mactop", "-p", "9101", "--headless"]
-    keep_alive true
-    log_path var/"log/mactop.log"
-    error_log_path var/"log/mactop.error.log"
-    process_type :background
-    nice 10
   end
 
   def caveats
     <<~EOS
       mactop requires macOS 12+, and runs exclusively on Apple Silicon.
-
-      To run mactop as a background service:
-        brew services start mactop
-
-      To view service error logs:
-        brew services logs mactop
-
-      Prometheus metrics will be available at:
-        http://localhost:9101/metrics
-
-      To change the Prometheus port:
-        1. brew services stop mactop
-        2. brew services edit mactop
-        3. Change 9101 to your desired port
-        4. brew services start mactop
-
-      Or run manually with a custom port:
-        mactop -p <PORT> --headless
     EOS
   end
 end
