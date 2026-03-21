@@ -325,7 +325,7 @@ func updateHelpText() {
 			"- p: Toggle party mode (color cycling)\n"+
 			"- l: Cycle through the 18 available layouts\n"+
 			"- i: Toggle information layout\n"+
-			"- F: Toggle fan control & thermals layout\n"+
+			"- Shift + F: Toggle fan control & thermals layout\n"+
 			"- F9: Kill selected process (y/n confirm)\n"+
 			"- f: Freeze the process list\n"+
 			"- /: Search process list\n"+
@@ -350,7 +350,7 @@ func updateHelpText() {
 			"--foreground: Set the UI foreground color (named or hex, e.g., green, #9580FF)\n"+
 			"--bg: Set the UI background color (named or hex, e.g., mocha-base, #22212C)\n"+
 			"--pid: Monitor a specific process by PID (e.g., --pid 1234)\n"+
-			"--fan-control: Enable interactive fan speed control (⚠️  writes to SMC, use with caution)\n"+
+			"--fan-control: Enable interactive fan speed control (Writes to SMC, use with caution*)\n"+
 			"--menubar: Run as a macOS menu bar status item (no TUI)\n\n"+
 			"Theme File: Create ~/.mactop/theme.json for custom colors:\n"+
 			"{\"foreground\": \"#9580FF\", \"background\": \"#22212C\"}\n\n",
