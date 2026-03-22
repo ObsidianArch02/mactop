@@ -556,6 +556,20 @@ func initializeTheme(colorName string, setColor bool, interval int, setInterval 
 // runAlternateMode checks for non-TUI modes and runs them.
 // Returns true if an alternate mode was handled (caller should return).
 func runAlternateMode() bool {
+	if dumpTemps {
+		if err := initSocMetrics(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to initialize metrics: %v\n", err)
+			os.Exit(1)
+		}
+		defer cleanupSocMetrics()
+		sysInfo := getSOCInfo()
+		fmt.Printf("System: %s\n", sysInfo.Name)
+		fmt.Printf("Cores: %d E + %d P + %d S = %d total\n",
+			sysInfo.ECoreCount, sysInfo.PCoreCount, sysInfo.SCoreCount, sysInfo.CoreCount)
+		fmt.Printf("GPU Cores: %d\n\n", sysInfo.GPUCoreCount)
+		DumpAllSMCTemps()
+		return true
+	}
 	if menubarWorker {
 		startMenuBarWorker()
 		return true
@@ -651,6 +665,7 @@ func Run() {
 	flag.Float64Var(&overlayOpacity, "overlay-opacity", 0.88, "Overlay window opacity (0.15-1.0)")
 	flag.IntVar(&filterPID, "pid", 0, "Monitor a specific process by PID")
 	flag.BoolVar(&fanControl, "fan-control", false, "Enable interactive fan speed control (⚠️  writes to SMC)")
+	flag.BoolVar(&dumpTemps, "dump-temps", false, "Diagnostic: dump all raw SMC temperature keys and exit")
 
 	loadConfig()
 

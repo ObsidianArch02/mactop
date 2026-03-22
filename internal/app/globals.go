@@ -74,6 +74,7 @@ var (
 	overlayWorker   bool    // Hidden: run as overlay worker process
 	overlaySections string  // Comma-separated visible sections for overlay
 	overlayOpacity  float64 // Overlay window opacity (0.15-1.0)
+	dumpTemps       bool    // Diagnostic: dump all SMC temperature keys
 	interruptChan   = make(chan struct{}, 10)
 
 	cachedTermWidth    int

@@ -1168,11 +1168,13 @@ static void loadAllTempSensors() {
     if (keyInfo.dataType != 1718383648)
       continue;
 
-    // Skip sensors with extreme values (> 200°C likely invalid)
-    // Note: don't exclude val <= 0 here — sensors may read 0°C when idle
-    // (e.g., inactive SSD, cold component) and warm up later.
+    // Validate sensor reading:
+    // - Skip sensors > 200°C (clearly invalid/sensor noise)
+    // - Skip sensors <= 0°C (CPU/GPU cores are never at/below freezing;
+    //   0 or negative values indicate inactive SMC keys returning garbage,
+    //   which is common on M2 Max where some Tp/Te keys exist but are unused)
     float val = (float)SMCGetFloatValue(g_smcConn, key);
-    if (val > 200)
+    if (val <= 0 || val > 200)
       continue;
 
     temp_sensor_t *sensor = &g_all_temp_sensors[g_all_temp_sensor_count];
@@ -1181,6 +1183,70 @@ static void loadAllTempSensors() {
              key[2], key[3]);
     sensor->value = val;
     g_all_temp_sensor_count++;
+  }
+}
+
+// Diagnostic dump: print ALL SMC temperature keys, including filtered ones
+void dumpAllSMCTemps(void) {
+  if (!g_smcConn) {
+    printf("SMC connection not available\n");
+    return;
+  }
+
+  printf("=== Raw SMC Temperature Keys ===\n");
+  printf("%-6s  %-20s  %8s  %s\n", "Key", "Category", "Value", "Status");
+  printf("------  --------------------  --------  ------\n");
+
+  int totalKeys = SMCGetKeyCount(g_smcConn);
+  int tempKeyCount = 0;
+  int filteredCount = 0;
+
+  for (int i = 0; i < totalKeys; i++) {
+    char key[5];
+    if (SMCGetKeyFromIndex(g_smcConn, i, key) != kIOReturnSuccess)
+      continue;
+
+    if (key[0] != 'T')
+      continue;
+
+    SMCKeyData_keyInfo_t keyInfo;
+    if (SMCGetKeyInfo(g_smcConn, key, &keyInfo) != kIOReturnSuccess)
+      continue;
+
+    // Only float type (flt )
+    if (keyInfo.dataType != 1718383648)
+      continue;
+
+    float val = (float)SMCGetFloatValue(g_smcConn, key);
+    const char *name = tempSensorName(key);
+    const char *status = "✅ OK";
+
+    if (val <= 0) {
+      status = "⚠ FILTERED (≤0°C)";
+      filteredCount++;
+    } else if (val > 200) {
+      status = "⚠ FILTERED (>200°C)";
+      filteredCount++;
+    }
+
+    printf("%-6s  %-20s  %7.1f°C  %s\n", key, name, val, status);
+    tempKeyCount++;
+  }
+
+  printf("\nTotal temperature keys: %d (filtered: %d, active: %d)\n",
+         tempKeyCount, filteredCount, tempKeyCount - filteredCount);
+
+  // Also print core configuration
+  printf("\n=== Core Configuration ===\n");
+  printf("CPU temp keys (Tp*/Te*): %d\n", g_cpu_key_count);
+  printf("GPU temp keys (Tg*):     %d\n", g_gpu_key_count);
+  for (int i = 0; i < g_cpu_key_count; i++) {
+    float val = (float)SMCGetFloatValue(g_smcConn, g_cpu_keys[i]);
+    printf("  CPU[%d] = %s  %.1f°C\n", i, g_cpu_keys[i], val);
+  }
+  for (int i = 0; i < g_gpu_key_count; i++) {
+    float val = (float)SMCGetFloatValue(g_smcConn, g_gpu_keys[i]);
+    printf("  GPU[%d] = %s  %.1f°C\n", i, g_gpu_keys[i], val);
   }
 }
 

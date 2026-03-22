@@ -523,17 +523,73 @@ func buildGroupedTempLines(sensors []TempSensor, themeColor string) []string {
 			seen[name] = true
 		}
 	}
-	// Append any remaining groups not in preferred order
+
+	// For per-core groups (e.g., "CPU E-Core 04"), sort them and
+	// renumber sequentially to display "CPU E-Core 00", "CPU E-Core 01", etc.
+	type coreEntry struct {
+		origKey   string // Original category key
+		coreType  string // "CPU E-Core", "CPU P-Core", "CPU S-Core"
+		sortKey   string // Original key for sorting
+	}
+	var perCoreEntries []coreEntry
+	coreTypes := []string{"CPU E-Core", "CPU P-Core", "CPU S-Core"}
+	for _, ct := range coreTypes {
+		var entries []coreEntry
+		for _, name := range groupOrder {
+			if name != ct && strings.HasPrefix(name, ct+" ") {
+				entries = append(entries, coreEntry{origKey: name, coreType: ct, sortKey: name})
+			}
+		}
+		// Sort by the original category key (which includes SMC key suffix)
+		sort.Slice(entries, func(a, b int) bool {
+			return entries[a].sortKey < entries[b].sortKey
+		})
+		perCoreEntries = append(perCoreEntries, entries...)
+	}
+
+	// Insert per-core entries after their group header (or after the last
+	// preferred entry of their type)
+	for _, entry := range perCoreEntries {
+		if !seen[entry.origKey] {
+			// Find the right insertion point: after the base type's grouped entry
+			insertIdx := -1
+			for i, name := range ordered {
+				if name == entry.coreType || strings.HasPrefix(name, entry.coreType+" ") {
+					insertIdx = i + 1
+				}
+			}
+			if insertIdx < 0 {
+				insertIdx = len(ordered)
+			}
+			// Insert at position
+			ordered = append(ordered[:insertIdx], append([]string{entry.origKey}, ordered[insertIdx:]...)...)
+			seen[entry.origKey] = true
+		}
+	}
+
+	// Append any remaining groups not yet ordered
 	for _, name := range groupOrder {
 		if !seen[name] {
 			ordered = append(ordered, name)
 		}
 	}
 
+	// Build lines, renumbering per-core entries sequentially
+	coreCounters := make(map[string]int) // tracks sequential index per core type
 	var lines []string
 	for _, cat := range ordered {
 		g := groups[cat]
-		lines = append(lines, formatTempGroupLine(cat, g, themeColor))
+		displayName := cat
+		// Renumber per-core sensors sequentially (CPU E-Core 04 → CPU E-Core 00, etc.)
+		for _, ct := range coreTypes {
+			if cat != ct && strings.HasPrefix(cat, ct+" ") {
+				idx := coreCounters[ct]
+				coreCounters[ct]++
+				displayName = fmt.Sprintf("%s %02d", ct, idx)
+				break
+			}
+		}
+		lines = append(lines, formatTempGroupLine(displayName, g, themeColor))
 	}
 	return lines
 }

@@ -94,6 +94,7 @@ int getThermalState();
 extern void debugIOReport(void);
 extern void printAllChannels(void);
 extern void debugMonitorChannels(int durationMs);
+extern void dumpAllSMCTemps(void);
 int setFanForceTest(int enabled);
 int setFanMode(int fanIndex, int mode);
 int setFanTarget(int fanIndex, int rpm);
@@ -273,6 +274,11 @@ func ResetFansToAuto() error {
 // DebugIOReport prints all available IOReport channels and groups to stdout
 func DebugIOReport() {
 	C.debugIOReport()
+}
+
+// DumpAllSMCTemps prints all SMC temperature keys with raw values for diagnostics
+func DumpAllSMCTemps() {
+	C.dumpAllSMCTemps()
 }
 
 // WiFiLinkInfo represents Wi-Fi interface link information
