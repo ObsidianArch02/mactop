@@ -409,7 +409,24 @@ var sensorGroupMap = map[byte]string{
 
 // sensorGroupName returns the group category for a sensor based on its SMC key.
 func sensorGroupName(key string) string {
-	if len(key) < 2 || key[0] != 'T' {
+	if len(key) < 2 {
+		return "Other"
+	}
+	// Handle HID synthetic keys (H prefix from IOHIDEventSystemClient)
+	if key[0] == 'H' {
+		switch key[1] {
+		case 'e':
+			return "CPU E-Core"
+		case 'p':
+			return "CPU P-Core"
+		case 's':
+			return "CPU S-Core"
+		case 'g':
+			return "GPU"
+		}
+		return "Other"
+	}
+	if key[0] != 'T' {
 		return "Other"
 	}
 	// Multi-char prefix matching for Apple Silicon specifics

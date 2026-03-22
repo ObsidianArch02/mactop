@@ -1353,6 +1353,118 @@ int resetFansToAuto() {
   return 0;
 }
 
+// Read per-core temperature sensors from IOHIDEventSystemClient.
+// This provides per-physical-core temperatures (what TG Pro uses).
+// Returns the number of sensors written into the output array.
+static int readHIDCoreTempSensors(temp_sensor_t *out, int maxSensors) {
+  int count = 0;
+
+  const void *keys[2] = {CFSTR("PrimaryUsagePage"), CFSTR("PrimaryUsage")};
+  int page = kHIDPage_AppleVendor;
+  int usage = kHIDUsage_AppleVendor_TemperatureSensor;
+  CFNumberRef pageNum =
+      CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &page);
+  CFNumberRef usageNum =
+      CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &usage);
+  const void *values[2] = {pageNum, usageNum};
+
+  CFDictionaryRef matching = CFDictionaryCreate(
+      kCFAllocatorDefault, keys, values, 2, &kCFTypeDictionaryKeyCallBacks,
+      &kCFTypeDictionaryValueCallBacks);
+  CFRelease(pageNum);
+  CFRelease(usageNum);
+
+  IOHIDEventSystemClientRef client =
+      IOHIDEventSystemClientCreate(kCFAllocatorDefault);
+  if (client == NULL) {
+    CFRelease(matching);
+    return 0;
+  }
+
+  IOHIDEventSystemClientSetMatching(client, matching);
+  CFRelease(matching);
+
+  CFArrayRef services = IOHIDEventSystemClientCopyServices(client);
+  if (services == NULL) {
+    CFRelease(client);
+    return 0;
+  }
+
+  // Track per-type sequential indices
+  int eIdx = 0, pIdx = 0, sIdx = 0, gpuIdx = 0;
+
+  CFIndex svcCount = CFArrayGetCount(services);
+  for (CFIndex i = 0; i < svcCount && count < maxSensors; i++) {
+    IOHIDServiceClientRef service =
+        (IOHIDServiceClientRef)CFArrayGetValueAtIndex(services, i);
+    if (service == NULL)
+      continue;
+
+    CFStringRef productRef =
+        IOHIDServiceClientCopyProperty(service, CFSTR("Product"));
+    if (productRef == NULL)
+      continue;
+
+    char product[128] = {0};
+    CFStringGetCString(productRef, product, sizeof(product),
+                       kCFStringEncodingUTF8);
+
+    IOHIDEventRef event = IOHIDServiceClientCopyEvent(
+        service, kIOHIDEventTypeTemperature, 0, 0);
+    if (event == NULL) {
+      CFRelease(productRef);
+      continue;
+    }
+
+    double temp =
+        IOHIDEventGetFloatValue(event, kIOHIDEventTypeTemperature << 16);
+    CFRelease(event);
+    CFRelease(productRef);
+
+    if (temp <= 10 || temp > 150)
+      continue;  // Apply same silicon minimum
+
+    // Classify by product name
+    const char *category = NULL;
+    int *idxPtr = NULL;
+
+    if (strstr(product, "eACC") != NULL) {
+      category = "CPU E-Core";
+      idxPtr = &eIdx;
+    } else if (strstr(product, "sACC") != NULL) {
+      // M5 Pro/Max/Ultra Super cores — check before pACC since
+      // sACC won't match pACC, but order matters for clarity
+      category = "CPU S-Core";
+      idxPtr = &sIdx;
+    } else if (strstr(product, "pACC") != NULL) {
+      category = "CPU P-Core";
+      idxPtr = &pIdx;
+    } else if (strstr(product, "GPU") != NULL) {
+      category = "GPU";
+      idxPtr = &gpuIdx;
+    }
+
+    if (category != NULL && idxPtr != NULL) {
+      temp_sensor_t *s = &out[count];
+      // Derive key prefix char from category: E→e, P→p, S→s, G→g
+      char keyChar = 'g'; // default for GPU
+      if (category[4] == 'E') keyChar = 'e';
+      else if (category[4] == 'P') keyChar = 'p';
+      else if (category[4] == 'S') keyChar = 's';
+      // Use synthetic key: He00, Hp00, Hs00, Hg00 (H prefix = HID source)
+      snprintf(s->key, sizeof(s->key), "H%c%02X", keyChar, *idxPtr);
+      snprintf(s->name, sizeof(s->name), "%s %02d", category, *idxPtr);
+      s->value = (float)temp;
+      (*idxPtr)++;
+      count++;
+    }
+  }
+
+  CFRelease(services);
+  CFRelease(client);
+  return count;
+}
+
 static float readSocTemperature(float *outCpuTemp, float *outGpuTemp) {
   float cpuSum = 0;
   int cpuCount = 0;
@@ -1802,17 +1914,26 @@ PowerMetrics samplePowerMetrics(int durationMs) {
 
   // Read all temperature sensors
   loadAllTempSensors();
-  // Copy sensors, refresh values, and filter out invalid readings.
-  // Filtering at refresh time (not enumeration) because cached keys may start
-  // at 0°C (idle) and warm up later.
-  //
-  // Category-aware thresholds:
-  // - CPU/GPU silicon sensors (Tp*/Te*/Tf*/Tc*/TC*/Tg*/TR*): minimum 10°C.
-  //   Active silicon cannot physically be below ~10°C during operation.
-  //   This catches garbage Tf* keys on M2 Max that read 2-8°C.
-  // - All other sensors (ambient, board, VRM, etc.): minimum 0°C.
+
+  // Strategy: Use HID (IOHIDEventSystemClient) for per-core CPU/GPU temps
+  // (accurate per-physical-core, same as TG Pro), then supplement with SMC
+  // sensors for everything else (board, VRM, ambient, SSD, etc.).
+
+  // Step 1: Read HID per-core sensors
+  temp_sensor_t hidSensors[64];
+  int hidCount = readHIDCoreTempSensors(hidSensors, 64);
+
   int validSensorCount = 0;
-  for (int i = 0; i < g_all_temp_sensor_count && i < 128; i++) {
+
+  // Step 2: If HID provided core sensors, add them first
+  if (hidCount > 0) {
+    for (int i = 0; i < hidCount && validSensorCount < 128; i++) {
+      metrics.temps[validSensorCount++] = hidSensors[i];
+    }
+  }
+
+  // Step 3: Add SMC sensors, skipping per-core keys if HID covers them
+  for (int i = 0; i < g_all_temp_sensor_count && validSensorCount < 128; i++) {
     float v = g_all_temp_sensors[i].value;
     if (g_smcConn) {
       v = (float)SMCGetFloatValue(g_smcConn, g_all_temp_sensors[i].key);
@@ -1821,10 +1942,14 @@ PowerMetrics samplePowerMetrics(int durationMs) {
     // Determine minimum threshold based on sensor category
     float minTemp = 0.0f;
     char k1 = g_all_temp_sensors[i].key[1];
-    // CPU core keys: p(Tp*), e(Te*), f(Tf*), c(Tc*), C(TC*)
-    // GPU keys: g(Tg*), R(TR*)
-    if (k1 == 'p' || k1 == 'e' || k1 == 'f' || k1 == 'c' || k1 == 'C' ||
-        k1 == 'g' || k1 == 'R') {
+    int isCoreKey = (k1 == 'p' || k1 == 'e' || k1 == 'f' ||
+                     k1 == 'c' || k1 == 'C' || k1 == 'g' || k1 == 'R');
+
+    if (isCoreKey) {
+      // If HID already provided per-core data, skip SMC core keys entirely
+      // to avoid double-counting and noise from garbage keys like Tf*
+      if (hidCount > 0)
+        continue;
       minTemp = 10.0f;  // Silicon minimum — no core runs below 10°C
     }
 
