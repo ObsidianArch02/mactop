@@ -1802,17 +1802,33 @@ PowerMetrics samplePowerMetrics(int durationMs) {
 
   // Read all temperature sensors
   loadAllTempSensors();
-  // Copy sensors, refresh values, and filter out invalid readings (<=0°C or >200°C).
+  // Copy sensors, refresh values, and filter out invalid readings.
   // Filtering at refresh time (not enumeration) because cached keys may start
   // at 0°C (idle) and warm up later.
+  //
+  // Category-aware thresholds:
+  // - CPU/GPU silicon sensors (Tp*/Te*/Tf*/Tc*/TC*/Tg*/TR*): minimum 10°C.
+  //   Active silicon cannot physically be below ~10°C during operation.
+  //   This catches garbage Tf* keys on M2 Max that read 2-8°C.
+  // - All other sensors (ambient, board, VRM, etc.): minimum 0°C.
   int validSensorCount = 0;
   for (int i = 0; i < g_all_temp_sensor_count && i < 128; i++) {
     float v = g_all_temp_sensors[i].value;
     if (g_smcConn) {
       v = (float)SMCGetFloatValue(g_smcConn, g_all_temp_sensors[i].key);
     }
-    // Only include sensors with valid readings (>0°C and <=200°C)
-    if (v > 0 && v <= 200) {
+
+    // Determine minimum threshold based on sensor category
+    float minTemp = 0.0f;
+    char k1 = g_all_temp_sensors[i].key[1];
+    // CPU core keys: p(Tp*), e(Te*), f(Tf*), c(Tc*), C(TC*)
+    // GPU keys: g(Tg*), R(TR*)
+    if (k1 == 'p' || k1 == 'e' || k1 == 'f' || k1 == 'c' || k1 == 'C' ||
+        k1 == 'g' || k1 == 'R') {
+      minTemp = 10.0f;  // Silicon minimum — no core runs below 10°C
+    }
+
+    if (v > minTemp && v <= 200) {
       metrics.temps[validSensorCount] = g_all_temp_sensors[i];
       metrics.temps[validSensorCount].value = v;
       validSensorCount++;
