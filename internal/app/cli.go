@@ -84,6 +84,8 @@ Options:
       --unit-temp <unit>    Temperature unit: celsius, fahrenheit (default: celsius)
       --pid <pid>         Monitor a specific process by PID
       --menubar           Run as a macOS menu bar status item (no TUI)
+      --overlay           Show floating overlay HUD window on top of all apps
+      --overlay-sections  Comma-separated visible sections (e.g. cpu,gpu,memory,power)
 
 Theme File:
   Create ~/.mactop/theme.json with custom hex colors:

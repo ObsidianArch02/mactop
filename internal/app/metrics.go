@@ -286,6 +286,14 @@ func collectMetrics(done chan struct{}, cpumetricsChan chan CPUMetrics, gpumetri
 			pushMenuBarMetricsToWorker(m, cpuMetrics, gpuMetrics, nd, sysInfo, maxFP32TFLOPs, getAvgCPUPercent(), thermalStr, rdmaStat)
 		}
 
+		// Push to overlay worker
+		if overlay {
+			renderMutex.Lock()
+			nd := lastNetDiskMetrics
+			renderMutex.Unlock()
+			pushOverlayMetrics(m, cpuMetrics, gpuMetrics, nd, sysInfo, maxFP32TFLOPs, getAvgCPUPercent(), thermalStr, rdmaStat)
+		}
+
 		elapsed := time.Since(start)
 		sleepTime := time.Duration(updateInterval)*time.Millisecond - elapsed
 		if sleepTime > 0 {

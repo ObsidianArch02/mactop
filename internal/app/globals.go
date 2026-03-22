@@ -66,11 +66,14 @@ var (
 	headlessPretty bool
 	headlessCount  int
 	headlessFormat string
-	menubar        bool   // Run as menu bar status item
-	filterPID      int    // Monitor a specific process by PID (0 = all)
-	cliBgColor     string // Background color from --bg flag
-	fanControl     bool   // Enable interactive fan speed control (requires --fan-control flag)
-	interruptChan  = make(chan struct{}, 10)
+	menubar         bool   // Run as menu bar status item
+	filterPID       int    // Monitor a specific process by PID (0 = all)
+	cliBgColor      string // Background color from --bg flag
+	fanControl      bool   // Enable interactive fan speed control (requires --fan-control flag)
+	overlay         bool   // Show floating overlay HUD window
+	overlayWorker   bool   // Hidden: run as overlay worker process
+	overlaySections string // Comma-separated visible sections for overlay
+	interruptChan   = make(chan struct{}, 10)
 
 	cachedTermWidth    int
 	cachedTermHeight   int

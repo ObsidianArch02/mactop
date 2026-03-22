@@ -560,6 +560,10 @@ func runAlternateMode() bool {
 		startMenuBarWorker()
 		return true
 	}
+	if overlayWorker {
+		startOverlayWorker()
+		return true
+	}
 	if headless {
 		runHeadless(headlessCount)
 		return true
@@ -641,6 +645,9 @@ func Run() {
 	flag.StringVar(&tempUnit, "unit-temp", "celsius", "Temperature unit: celsius, fahrenheit")
 	flag.BoolVar(&menubar, "menubar", false, "Run as a macOS menu bar status item (no TUI)")
 	flag.BoolVar(&menubarWorker, "menubar-worker", false, "Internal: Run as menu bar worker process")
+	flag.BoolVar(&overlay, "overlay", false, "Show floating overlay HUD window on top of all apps")
+	flag.BoolVar(&overlayWorker, "overlay-worker", false, "Internal: Run as overlay worker process")
+	flag.StringVar(&overlaySections, "overlay-sections", "", "Comma-separated visible sections for overlay (e.g. cpu,gpu,memory)")
 	flag.IntVar(&filterPID, "pid", 0, "Monitor a specific process by PID")
 	flag.BoolVar(&fanControl, "fan-control", false, "Enable interactive fan speed control (⚠️  writes to SMC)")
 
@@ -702,6 +709,13 @@ func Run() {
 	if menubar {
 		if err := startMenuBarProcess(); err != nil {
 			stderrLogger.Printf("Failed to start menubar worker: %v\n", err)
+		}
+	}
+
+	// Spawn overlay worker if --overlay is set
+	if overlay {
+		if err := startOverlayProcess(); err != nil {
+			stderrLogger.Printf("Failed to start overlay worker: %v\n", err)
 		}
 	}
 
