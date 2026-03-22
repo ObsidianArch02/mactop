@@ -1436,7 +1436,10 @@ static int readHIDCoreTempSensors(temp_sensor_t *out, int maxSensors) {
       // sACC won't match pACC, but order matters for clarity
       category = "CPU S-Core";
       idxPtr = &sIdx;
-    } else if (strstr(product, "pACC") != NULL) {
+    } else if (strstr(product, "pACC") != NULL ||
+               strstr(product, "mACC") != NULL) {
+      // M-cores (Medium, M5) are treated as P-cores for display,
+      // consistent with native_stats.go core classification
       category = "CPU P-Core";
       idxPtr = &pIdx;
     } else if (strstr(product, "GPU") != NULL) {
