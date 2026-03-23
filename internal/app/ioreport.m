@@ -849,9 +849,13 @@ int initIOReport() {
       IOReportMergeChannels((CFDictionaryRef)g_channels, pmpChan, NULL);
       CFRelease(pmpChan);
 
-      // Re-create subscription with PMP channels included
-      g_subscription =
+      // Re-create subscription with PMP channels included.
+      // Guard: don't lose the working subscription if this fails.
+      IOReportSubscriptionRef newSub =
           IOReportCreateSubscription(NULL, g_channels, &subsystem, 0, NULL);
+      if (newSub != NULL) {
+        g_subscription = newSub;
+      }
     }
 
     // Initialize kperf-based DRAM BW monitoring as additional fallback.
