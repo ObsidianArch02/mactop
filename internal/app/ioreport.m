@@ -185,7 +185,7 @@ static uint32_t g_scpu_freqs[64];
 static int g_scpu_freq_count = 0;
 
 // All discovered temperature sensors
-static temp_sensor_t g_all_temp_sensors[128];
+static temp_sensor_t g_all_temp_sensors[512];
 static int g_all_temp_sensor_count = 0;
 
 // Expected physical core counts (set from Go via setExpectedCoreCounts)
@@ -341,7 +341,7 @@ static void loadGpuFrequencies() {
 
         for (CFIndex i = 0; i < count; i++) {
           CFStringRef key = (CFStringRef)keys[i];
-          char keyName[128];
+          char keyName[512];
           CFStringGetCString(key, keyName, sizeof(keyName),
                              kCFStringEncodingUTF8);
 
@@ -954,7 +954,7 @@ void debugIOReport() {
 
       char group[64] = {0};
       char subGroup[64] = {0};
-      char channel[128] = {0};
+      char channel[512] = {0};
       char unit[32] = {0};
 
       if (groupRef)
@@ -1002,7 +1002,7 @@ typedef struct {
   fan_info_t fans[8];
   // Comprehensive temperature sensors
   int tempSensorCount;
-  temp_sensor_t temps[128];
+  temp_sensor_t temps[512];
 } PowerMetrics;
 
 static int cfStringMatch(CFStringRef str, const char *match) {
@@ -1111,7 +1111,7 @@ static const char *tempSensorName(const char *key) {
   case 'M':
     return "Memory"; // TM* = Memory VRM
   case 's':
-    return "SSD"; // Ts* = SSD proximity
+    return "CPU S-Core"; // Ts* = CPU S-Core
   case 'S':
     return "SSD"; // TS* = SSD controller
   case 'H':
@@ -1173,8 +1173,8 @@ static void loadSMCTempKeys() {
     if (keyInfo.dataType != 1718383648)
       continue;
 
-    // CPU Keys: Tp* or Te*
-    if ((key[0] == 'T' && (key[1] == 'p' || key[1] == 'e'))) {
+    // CPU Keys: Tp*, Te*, or Ts*
+    if ((key[0] == 'T' && (key[1] == 'p' || key[1] == 'e' || key[1] == 's'))) {
       if (g_cpu_key_count < 64) {
         strcpy(g_cpu_keys[g_cpu_key_count++], key);
       }
@@ -1196,7 +1196,7 @@ static void loadAllTempSensors() {
     return;
 
   int totalKeys = SMCGetKeyCount(g_smcConn);
-  for (int i = 0; i < totalKeys && g_all_temp_sensor_count < 128; i++) {
+  for (int i = 0; i < totalKeys && g_all_temp_sensor_count < 512; i++) {
     char key[5];
     if (SMCGetKeyFromIndex(g_smcConn, i, key) != kIOReturnSuccess)
       continue;
@@ -1447,7 +1447,7 @@ static int readHIDCoreTempSensors(temp_sensor_t *out, int maxSensors,
     if (productRef == NULL)
       continue;
 
-    char product[128] = {0};
+    char product[512] = {0};
     CFStringGetCString(productRef, product, sizeof(product),
                        kCFStringEncodingUTF8);
 
@@ -1557,7 +1557,7 @@ static float readSocTemperature(float *outCpuTemp, float *outGpuTemp) {
           if (productRef == NULL)
             continue;
 
-          char product[128] = {0};
+          char product[512] = {0};
           CFStringGetCString(productRef, product, sizeof(product),
                              kCFStringEncodingUTF8);
 
@@ -2018,7 +2018,7 @@ PowerMetrics samplePowerMetrics(int durationMs) {
 
   // Step 3: Add validated HID sensors for categories that passed validation
   if (hidTotal > 0) {
-    for (int i = 0; i < hidTotal && validSensorCount < 128; i++) {
+    for (int i = 0; i < hidTotal && validSensorCount < 512; i++) {
       char hk = hidSensors[i].key[1]; // e, p, s, or g
       int include = 0;
       if (hk == 'e' && useHidEcore) include = 1;
@@ -2035,13 +2035,13 @@ PowerMetrics samplePowerMetrics(int durationMs) {
   // Tiered caching: slow-changing sensors (Ambient, Board, SSD, VRM, etc.)
   // are only read from SMC every 5th tick to reduce IPC overhead.
   static int smcTempTick = 0;
-  static temp_sensor_t smcTempCache[128];
+  static temp_sensor_t smcTempCache[512];
   static int smcTempCacheCount = 0;
   int refreshSlowSensors = (smcTempTick % 5 == 0);  // Refresh every 5th tick
   smcTempTick++;
 
   int newCacheCount = 0;
-  for (int i = 0; i < g_all_temp_sensor_count && validSensorCount < 128; i++) {
+  for (int i = 0; i < g_all_temp_sensor_count && validSensorCount < 512; i++) {
     char k1 = g_all_temp_sensors[i].key[1];
 
     // Check if this SMC key's category is already covered by HID
@@ -2053,7 +2053,7 @@ PowerMetrics samplePowerMetrics(int durationMs) {
     if (coveredByHID) continue;
 
     // Classify: silicon core sensors change rapidly, environmental sensors don't
-    int isCoreKey = (k1 == 'p' || k1 == 'e' || k1 == 'f' ||
+    int isCoreKey = (k1 == 'p' || k1 == 'e' || k1 == 'f' || k1 == 's' || k1 == 'S' ||
                      k1 == 'c' || k1 == 'C' || k1 == 'g' || k1 == 'R');
     int isSlowSensor = !isCoreKey;  // Ambient, Board, SSD, VRM, etc.
 

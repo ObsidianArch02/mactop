@@ -128,7 +128,7 @@ func NewCPUCoreWidget(modelInfo SystemInfo) *CPUCoreWidget {
 	// Use dynamic core topology detection from IORegistry
 	labels, eCount, pCount, sCount, cpuIndexMap := BuildCoreLabels()
 
-	if labels == nil || len(labels) == 0 {
+	if len(labels) == 0 {
 		// Fallback to sysctl-based counts (old behavior)
 		eCoreCount := modelInfo.ECoreCount
 		pCoreCount := modelInfo.PCoreCount
@@ -174,7 +174,7 @@ func NewCPUCoreWidget(modelInfo SystemInfo) *CPUCoreWidget {
 
 func (w *CPUCoreWidget) UpdateUsage(usage []float64) {
 	// Remap usage data from hardware order to display order (E cores first, then P)
-	if w.cpuIndexMap != nil && len(w.cpuIndexMap) > 0 {
+	if len(w.cpuIndexMap) > 0 {
 		w.cores = make([]float64, len(w.cpuIndexMap))
 		for displayIdx, cpuIdx := range w.cpuIndexMap {
 			if cpuIdx < len(usage) {

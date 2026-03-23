@@ -397,7 +397,7 @@ func fanRPMBar(fan FanInfo, themeColor string) []string {
 var sensorGroupMap = map[byte]string{
 	'p': "CPU P-Core", 'e': "CPU E-Core", 'f': "CPU P-Core",
 	'g': "GPU", 'C': "CPU Core", 'c': "CPU Core",
-	'm': "Memory", 'M': "Memory", 's': "SSD", 'S': "SSD",
+	'm': "Memory", 'M': "Memory", 's': "CPU S-Core", 'S': "SSD",
 	'H': "NAND", 'N': "NAND",
 	'a': "Ambient", 'A': "Ambient", 'F': "Ambient",
 	'B': "Board", 'b': "Board",

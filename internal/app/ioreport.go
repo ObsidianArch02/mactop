@@ -84,7 +84,7 @@ typedef struct {
     int fanCount;
     fan_info_t fans[8];
     int tempSensorCount;
-    temp_sensor_t temps[128];
+    temp_sensor_t temps[512];
 } PowerMetrics;
 
 int initIOReport();
@@ -196,7 +196,7 @@ func sampleSocMetrics(durationMs int) SocMetrics {
 
 	// Convert temp sensor data from C arrays to Go slices
 	tempSensors := make([]TempSensor, int(pm.tempSensorCount))
-	for i := 0; i < int(pm.tempSensorCount) && i < 128; i++ {
+	for i := 0; i < int(pm.tempSensorCount) && i < 512; i++ {
 		ct := pm.temps[i]
 		tempSensors[i] = TempSensor{
 			Key:   C.GoString(&ct.key[0]),
