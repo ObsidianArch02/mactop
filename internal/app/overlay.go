@@ -381,23 +381,23 @@ func pushOverlayMetrics(sm SocMetrics, cpuMetrics CPUMetrics, gpuMetrics GPUMetr
 	}
 
 	if err := overlayMetricsEncoder.Encode(payload); err != nil {
+		// Worker likely died — attempt restart with cooldown.
+		// Clean up the broken encoder/pipe first.
 		overlayMetricsEncoder = nil
-
-		// Worker likely died — attempt restart with cooldown
-		if time.Since(overlayLastRestart) < 2*time.Second {
-			return // Too soon, skip this cycle
-		}
-		stderrLogger.Printf("Overlay worker pipe broken, restarting: %v\n", err)
-		overlayLastRestart = time.Now()
-
-		// Clean up old resources
 		if overlayWorkerStdin != nil {
 			overlayWorkerStdin.Close()
+			overlayWorkerStdin = nil
 		}
 		if overlayWorkerCmd != nil && overlayWorkerCmd.Process != nil {
 			overlayWorkerCmd.Process.Kill()
+			overlayWorkerCmd = nil
 		}
-		overlayMetricsEncoder = nil
+
+		if time.Since(overlayLastRestart) < 2*time.Second {
+			return // Too soon, skip — next call will re-check cooldown
+		}
+		stderrLogger.Printf("Overlay worker pipe broken, restarting: %v\n", err)
+		overlayLastRestart = time.Now()
 
 		if restartErr := startOverlayProcess(); restartErr != nil {
 			stderrLogger.Printf("Failed to restart overlay worker: %v\n", restartErr)

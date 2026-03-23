@@ -1115,7 +1115,7 @@ static const char *tempSensorName(const char *key) {
   case 'M':
     return "Memory"; // TM* = Memory VRM
   case 's':
-    return "CPU S-Core"; // Ts* = CPU S-Core
+    return (g_expected_scores > 0) ? "CPU S-Core" : "SSD"; // Ts* = S-Core on M5+, SSD on M1-M4
   case 'S':
     return "SSD"; // TS* = SSD controller
   case 'H':
@@ -1177,8 +1177,8 @@ static void loadSMCTempKeys() {
     if (keyInfo.dataType != 1718383648)
       continue;
 
-    // CPU Keys: Tp*, Te*, or Ts*
-    if ((key[0] == 'T' && (key[1] == 'p' || key[1] == 'e' || key[1] == 's'))) {
+    // CPU Keys: Tp*, Te*, and Ts* (only if chip has S-cores)
+    if ((key[0] == 'T' && (key[1] == 'p' || key[1] == 'e' || (key[1] == 's' && g_expected_scores > 0)))) {
       if (g_cpu_key_count < 64) {
         strcpy(g_cpu_keys[g_cpu_key_count++], key);
       }

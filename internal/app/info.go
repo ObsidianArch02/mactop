@@ -394,10 +394,11 @@ func fanRPMBar(fan FanInfo, themeColor string) []string {
 }
 
 // sensorGroupMap maps SMC key second character to group category.
+// Note: 's' is handled conditionally in sensorGroupName (SSD on M1-M4, S-Core on M5+).
 var sensorGroupMap = map[byte]string{
 	'p': "CPU P-Core", 'e': "CPU E-Core", 'f': "CPU P-Core",
 	'g': "GPU", 'C': "CPU Core", 'c': "CPU Core",
-	'm': "Memory", 'M': "Memory", 's': "CPU S-Core", 'S': "SSD",
+	'm': "Memory", 'M': "Memory", 'S': "SSD",
 	'H': "NAND", 'N': "NAND",
 	'a': "Ambient", 'A': "Ambient", 'F': "Ambient",
 	'B': "Board", 'b': "Board",
@@ -434,6 +435,13 @@ func sensorGroupName(key string) string {
 		if group := getAppleSiliconSensorGroup(key); group != "" {
 			return group
 		}
+	}
+	// Conditional: 's' = CPU S-Core on M5+ (has S-cores), SSD on M1-M4
+	if key[1] == 's' {
+		if cachedSystemInfo.SCoreCount > 0 {
+			return "CPU S-Core"
+		}
+		return "SSD"
 	}
 	if group, ok := sensorGroupMap[key[1]]; ok {
 		return group
