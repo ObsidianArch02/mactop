@@ -916,19 +916,31 @@ func finalizeCPUUI(totalUsage float64, coreUsages []float64, cpuMetrics CPUMetri
 	}
 }
 
+var lastEFreq, lastPFreq, lastSFreq int
+
 func formatCPUFreq(cpuMetrics CPUMetrics) string {
-	if cpuMetrics.EClusterFreqMHz <= 0 && cpuMetrics.PClusterFreqMHz <= 0 {
+	// Retain last known non-zero frequency so idle samples don't cause flicker
+	if cpuMetrics.EClusterFreqMHz > 0 {
+		lastEFreq = cpuMetrics.EClusterFreqMHz
+	}
+	if cpuMetrics.PClusterFreqMHz > 0 {
+		lastPFreq = cpuMetrics.PClusterFreqMHz
+	}
+	if cpuMetrics.SClusterFreqMHz > 0 {
+		lastSFreq = cpuMetrics.SClusterFreqMHz
+	}
+	if lastEFreq <= 0 && lastPFreq <= 0 {
 		return ""
 	}
 	parts := make([]string, 0, 3)
-	if cpuMetrics.EClusterFreqMHz > 0 {
-		parts = append(parts, fmt.Sprintf("E%.1f", float64(cpuMetrics.EClusterFreqMHz)/1000.0))
+	if lastEFreq > 0 {
+		parts = append(parts, fmt.Sprintf("E%.1f", float64(lastEFreq)/1000.0))
 	}
-	if cpuMetrics.PClusterFreqMHz > 0 {
-		parts = append(parts, fmt.Sprintf("P%.1f", float64(cpuMetrics.PClusterFreqMHz)/1000.0))
+	if lastPFreq > 0 {
+		parts = append(parts, fmt.Sprintf("P%.1f", float64(lastPFreq)/1000.0))
 	}
-	if cpuMetrics.SClusterFreqMHz > 0 {
-		parts = append(parts, fmt.Sprintf("S%.1f", float64(cpuMetrics.SClusterFreqMHz)/1000.0))
+	if lastSFreq > 0 {
+		parts = append(parts, fmt.Sprintf("S%.1f", float64(lastSFreq)/1000.0))
 	}
 	return " @ " + strings.Join(parts, "/") + " GHz"
 }

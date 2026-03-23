@@ -1639,8 +1639,13 @@ PowerMetrics samplePowerMetrics(int durationMs) {
             }
 
             if (isECluster) {
-              eClusterActive = activePercent;
-              eClusterFreq = avgFreq;
+              // Take max across E-clusters (multi-die chips have E0, E1)
+              if (avgFreq > eClusterFreq) {
+                eClusterFreq = avgFreq;
+              }
+              if (activePercent > eClusterActive) {
+                eClusterActive = activePercent;
+              }
             } else if (isMCluster) {
               // M5+ Medium/Performance tier — accumulate across MCPU0, MCPU1
               mClusterActiveSum += activePercent;
@@ -1650,9 +1655,14 @@ PowerMetrics samplePowerMetrics(int durationMs) {
               }
             } else if (isPCluster) {
               // PCPU — on M1-M4 this is the Performance cluster,
-              // on M5+ this is the Super cluster. We'll sort it out after the loop.
-              pcpuActive = activePercent;
-              pcpuFreq = avgFreq;
+              // on M5+ this is the Super cluster. Take max across clusters
+              // (multi-die chips have P0, P1, P2, P3).
+              if (avgFreq > pcpuFreq) {
+                pcpuFreq = avgFreq;
+              }
+              if (activePercent > pcpuActive) {
+                pcpuActive = activePercent;
+              }
               hasPCPU = 1;
             } else if (isSCluster) {
               sClusterActive = activePercent;
