@@ -265,12 +265,7 @@ func collectMetrics(done chan struct{}, cpumetricsChan chan CPUMetrics, gpumetri
 		}
 
 		// Update fan and temp sensor Prometheus metrics
-		for _, fan := range m.Fans {
-			fanRPM.With(prometheus.Labels{"fan_id": fmt.Sprintf("%d", fan.ID), "fan_name": fan.Name}).Set(float64(fan.ActualRPM))
-		}
-		for _, sensor := range m.TempSensors {
-			tempSensorGauge.With(prometheus.Labels{"key": sensor.Key, "name": sensor.Name}).Set(sensor.Value)
-		}
+		updatePrometheusSensors(m.Fans, m.TempSensors)
 
 		if dispatchMetrics(done, cpumetricsChan, gpumetricsChan, tbNetStatsChan, triggerProcessCollectionChan, cpuMetrics, gpuMetrics, GetThunderboltNetStats()) {
 			return
@@ -300,6 +295,15 @@ func collectMetrics(done chan struct{}, cpumetricsChan chan CPUMetrics, gpumetri
 			case <-interruptChan:
 			}
 		}
+	}
+}
+
+func updatePrometheusSensors(fans []FanInfo, sensors []TempSensor) {
+	for _, fan := range fans {
+		fanRPM.With(prometheus.Labels{"fan_id": fmt.Sprintf("%d", fan.ID), "fan_name": fan.Name}).Set(float64(fan.ActualRPM))
+	}
+	for _, sensor := range sensors {
+		tempSensorGauge.With(prometheus.Labels{"key": sensor.Key, "name": sensor.Name}).Set(sensor.Value)
 	}
 }
 

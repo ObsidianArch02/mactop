@@ -431,20 +431,28 @@ func sensorGroupName(key string) string {
 	}
 	// Multi-char prefix matching for Apple Silicon specifics
 	if len(key) >= 3 {
-		if (key[1] == 'P' && (key[2] == 'D' || key[2] == 'M' || key[2] == 'S')) || key[1] == 'R' && key[2] == 'D' {
-			if key[1] == 'R' {
-				return "GPU"
-			}
-			return "SoC Package"
-		}
-		if key[1] == 'C' && (key[2] == 'M' || key[2] == 'D') {
-			return "CPU Die"
+		if group := getAppleSiliconSensorGroup(key); group != "" {
+			return group
 		}
 	}
 	if group, ok := sensorGroupMap[key[1]]; ok {
 		return group
 	}
 	return "Other"
+}
+
+// getAppleSiliconSensorGroup is a helper to reduce cyclomatic complexity
+func getAppleSiliconSensorGroup(key string) string {
+	if (key[1] == 'P' && (key[2] == 'D' || key[2] == 'M' || key[2] == 'S')) || key[1] == 'R' && key[2] == 'D' {
+		if key[1] == 'R' {
+			return "GPU"
+		}
+		return "SoC Package"
+	}
+	if key[1] == 'C' && (key[2] == 'M' || key[2] == 'D') {
+		return "CPU Die"
+	}
+	return ""
 }
 
 // classifyCPUCoreSensors splits generic "CPU Core" sensors into E-Core, P-Core,

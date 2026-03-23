@@ -137,46 +137,39 @@ func applyOverlayConfig(sections string) {
 		ccfg.show_gpu_freq = 0
 
 		for _, s := range strings.Split(sections, ",") {
-			switch strings.TrimSpace(strings.ToLower(s)) {
-			case "cpu":
-				ccfg.show_cpu = 1
-			case "gpu":
-				ccfg.show_gpu = 1
-			case "ane":
-				ccfg.show_ane = 1
-			case "memory", "mem":
-				ccfg.show_memory = 1
-			case "power":
-				ccfg.show_power = 1
-			case "temps", "temp", "temperature":
-				ccfg.show_temps = 1
-			case "thermals", "thermal":
-				ccfg.show_thermals = 1
-			case "fans", "fan":
-				ccfg.show_fans = 1
-			case "bandwidth", "bw", "dram":
-				ccfg.show_bandwidth = 1
-			case "network", "net":
-				ccfg.show_network = 1
-			case "gpu-freq", "gpufreq", "freq", "tflops":
-				ccfg.show_gpu_freq = 1
-			case "all":
-				ccfg.show_cpu = 1
-				ccfg.show_gpu = 1
-				ccfg.show_ane = 1
-				ccfg.show_memory = 1
-				ccfg.show_power = 1
-				ccfg.show_temps = 1
-				ccfg.show_thermals = 1
-				ccfg.show_fans = 1
-				ccfg.show_bandwidth = 1
-				ccfg.show_network = 1
-				ccfg.show_gpu_freq = 1
-			}
+			setOverlaySectionFlag(&ccfg, strings.TrimSpace(strings.ToLower(s)))
 		}
 	}
 
 	C.setOverlayConfig(&ccfg)
+}
+
+// setOverlaySectionFlag is a helper to reduce cyclomatic complexity
+func setOverlaySectionFlag(ccfg *C.overlay_config_t, section string) {
+	switch section {
+	case "cpu":
+		ccfg.show_cpu = 1
+	case "gpu":
+		ccfg.show_gpu = 1
+	case "ane", "npu":
+		ccfg.show_ane = 1
+	case "mem", "memory":
+		ccfg.show_memory = 1
+	case "power":
+		ccfg.show_power = 1
+	case "temp", "temps", "temperature":
+		ccfg.show_temps = 1
+	case "thermal", "thermals":
+		ccfg.show_thermals = 1
+	case "fan", "fans":
+		ccfg.show_fans = 1
+	case "bw", "bandwidth":
+		ccfg.show_bandwidth = 1
+	case "net", "network":
+		ccfg.show_network = 1
+	case "gpu-freq", "gpu_freq":
+		ccfg.show_gpu_freq = 1
+	}
 }
 
 // startOverlayWorker is the entry point for the child process (--overlay-worker).

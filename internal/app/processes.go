@@ -132,21 +132,7 @@ func processOsProc(kp C.struct_kinfo_proc, now time.Time, prevProcessTimes map[i
 		memPercent = (float64(rssBytes) / float64(totalMem)) * 100.0
 	}
 
-	state := ""
-	switch kp.kp_proc.p_stat {
-	case C.SIDL:
-		state = "I"
-	case C.SRUN:
-		state = "R"
-	case C.SSLEEP:
-		state = "S"
-	case C.SSTOP:
-		state = "T"
-	case C.SZOMB:
-		state = "Z"
-	default:
-		state = "?"
-	}
+	state := processStateString(kp.kp_proc.p_stat)
 
 	uid := uint32(kp.kp_eproc.e_ucred.cr_uid)
 	user := getUsername(uid)
@@ -168,6 +154,23 @@ func processOsProc(kp C.struct_kinfo_proc, now time.Time, prevProcessTimes map[i
 		LastUpdated: now,
 	}
 	return pm, pid, newState, true
+}
+
+func processStateString(stat C.char) string {
+	switch stat {
+	case C.SIDL:
+		return "I"
+	case C.SRUN:
+		return "R"
+	case C.SSLEEP:
+		return "S"
+	case C.SSTOP:
+		return "T"
+	case C.SZOMB:
+		return "Z"
+	default:
+		return "?"
+	}
 }
 
 func getProcessList(systemGpuPercent float64) ([]ProcessMetrics, error) {

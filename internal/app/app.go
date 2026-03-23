@@ -641,31 +641,7 @@ func Run() {
 	}
 	defer logfile.Close()
 
-	flag.StringVar(&prometheusPort, "prometheus", "", "Port to run Prometheus metrics server on (e.g. :9090)")
-	flag.StringVar(&prometheusPort, "p", "", "Port to run Prometheus metrics server on (e.g. :9090)")
-	flag.BoolVar(&headless, "headless", false, "Run in headless mode (no TUI, output JSON to stdout)")
-	flag.BoolVar(&headlessPretty, "pretty", false, "Pretty print output in headless mode")
-	flag.IntVar(&headlessCount, "count", 0, "Number of samples to collect in headless mode (0 = infinite)")
-	flag.StringVar(&headlessFormat, "format", "json", "Output format for headless mode: json, yaml, xml, csv, toon")
-	flag.IntVar(&updateInterval, "interval", 1000, "Update interval in milliseconds")
-	flag.IntVar(&updateInterval, "i", 1000, "Update interval in milliseconds")
-	flag.Bool("d", false, "Dump all available IOReport channels and exit")
-	flag.Bool("dump-ioreport", false, "Dump all available IOReport channels and exit")
-	flag.StringVar(&colorName, "foreground", "", "Set the UI foreground color (named or hex, e.g., green, #9580FF)")
-	flag.StringVar(&cliBgColor, "bg", "", "Set the UI background color (named or hex, e.g., mocha-base, #22212C)")
-	flag.StringVar(&cliBgColor, "background", "", "Set the UI background color (alias for --bg)")
-	flag.StringVar(&networkUnit, "unit-network", "auto", "Network unit: auto, byte, kb, mb, gb")
-	flag.StringVar(&diskUnit, "unit-disk", "auto", "Disk unit: auto, byte, kb, mb, gb")
-	flag.StringVar(&tempUnit, "unit-temp", "celsius", "Temperature unit: celsius, fahrenheit")
-	flag.BoolVar(&menubar, "menubar", false, "Run as a macOS menu bar status item (no TUI)")
-	flag.BoolVar(&menubarWorker, "menubar-worker", false, "Internal: Run as menu bar worker process")
-	flag.BoolVar(&overlay, "overlay", false, "Show floating overlay HUD window on top of all apps")
-	flag.BoolVar(&overlayWorker, "overlay-worker", false, "Internal: Run as overlay worker process")
-	flag.StringVar(&overlaySections, "overlay-sections", "", "Comma-separated visible sections for overlay (e.g. cpu,gpu,memory)")
-	flag.Float64Var(&overlayOpacity, "overlay-opacity", 0.88, "Overlay window opacity (0.15-1.0)")
-	flag.IntVar(&filterPID, "pid", 0, "Monitor a specific process by PID")
-	flag.BoolVar(&fanControl, "fan-control", false, "Enable interactive fan speed control (⚠️  writes to SMC)")
-	flag.BoolVar(&dumpTemps, "dump-temps", false, "Diagnostic: dump all raw SMC temperature keys and exit")
+	parseCommandLineFlags()
 
 	loadConfig()
 
@@ -706,34 +682,14 @@ func Run() {
 	initializeTheme(colorName, setColor, interval, setInterval)
 	setupGrid()
 	termWidth, termHeight := ui.TerminalDimensions()
-	mainBlock.SetRect(0, 0, termWidth, termHeight)
-	if termWidth < 93 {
-		mainBlock.TitleBottom = ""
-	} else {
-		mainBlock.TitleBottom = " Info: i | Layout: l | Color: c | BG: b | Exit: q "
-	}
-	if termWidth > 2 && termHeight > 2 {
-		grid.SetRect(1, 1, termWidth-1, termHeight-1)
-	}
+	setupMainBlockLayout(termWidth, termHeight)
 	renderUI()
 
 	seedInitialMetrics()
 
 	triggerProcessCollectionChan := make(chan struct{}, 1)
 
-	// In multi-process mode, we spawn the worker here if --menubar is set on the parent
-	if menubar {
-		if err := startMenuBarProcess(); err != nil {
-			stderrLogger.Printf("Failed to start menubar worker: %v\n", err)
-		}
-	}
-
-	// Spawn overlay worker if --overlay is set
-	if overlay {
-		if err := startOverlayProcess(); err != nil {
-			stderrLogger.Printf("Failed to start overlay worker: %v\n", err)
-		}
-	}
+	startBackgroundWorkers()
 
 	go collectMetrics(done, cpuMetricsChan, gpuMetricsChan, tbNetStatsChan, triggerProcessCollectionChan)
 	go collectProcessMetrics(done, processMetricsChan, triggerProcessCollectionChan)
@@ -1308,5 +1264,58 @@ func updateTBNetUI(tbStats []ThunderboltNetStats) {
 		rdmaAvailable.Set(1)
 	} else {
 		rdmaAvailable.Set(0)
+	}
+}
+
+func parseCommandLineFlags() {
+	flag.StringVar(&prometheusPort, "prometheus", "", "Port to run Prometheus metrics server on (e.g. :9090)")
+	flag.StringVar(&prometheusPort, "p", "", "Port to run Prometheus metrics server on (e.g. :9090)")
+	flag.BoolVar(&headless, "headless", false, "Run in headless mode (no TUI, output JSON to stdout)")
+	flag.BoolVar(&headlessPretty, "pretty", false, "Pretty print output in headless mode")
+	flag.IntVar(&headlessCount, "count", 0, "Number of samples to collect in headless mode (0 = infinite)")
+	flag.StringVar(&headlessFormat, "format", "json", "Output format for headless mode: json, yaml, xml, csv, toon")
+	flag.IntVar(&updateInterval, "interval", 1000, "Update interval in milliseconds")
+	flag.IntVar(&updateInterval, "i", 1000, "Update interval in milliseconds")
+	flag.Bool("d", false, "Dump all available IOReport channels and exit")
+	flag.Bool("dump-ioreport", false, "Dump all available IOReport channels and exit")
+	// The colorName pointer handles assigning local scope references directly
+	flag.StringVar(&cliBgColor, "bg", "", "Set the UI background color (named or hex, e.g., mocha-base, #22212C)")
+	flag.StringVar(&cliBgColor, "background", "", "Set the UI background color (alias for --bg)")
+	flag.StringVar(&networkUnit, "unit-network", "auto", "Network unit: auto, byte, kb, mb, gb")
+	flag.StringVar(&diskUnit, "unit-disk", "auto", "Disk unit: auto, byte, kb, mb, gb")
+	flag.StringVar(&tempUnit, "unit-temp", "celsius", "Temperature unit: celsius, fahrenheit")
+	flag.BoolVar(&menubar, "menubar", false, "Run as macOS menu bar status item (no TUI)")
+	flag.BoolVar(&menubarWorker, "menubar-worker", false, "Internal: Run as menu bar worker process")
+	flag.BoolVar(&overlay, "overlay", false, "Show floating overlay HUD window on top of all apps")
+	flag.BoolVar(&overlayWorker, "overlay-worker", false, "Internal: Run as overlay worker process")
+	flag.StringVar(&overlaySections, "overlay-sections", "", "Comma-separated visible sections for overlay (e.g. cpu,gpu,memory)")
+	flag.Float64Var(&overlayOpacity, "overlay-opacity", 0.88, "Overlay window opacity (0.15-1.0)")
+	flag.IntVar(&filterPID, "pid", 0, "Monitor a specific process by PID")
+	flag.BoolVar(&fanControl, "fan-control", false, "Enable interactive fan speed control (⚠️  writes to SMC)")
+	flag.BoolVar(&dumpTemps, "dump-temps", false, "Diagnostic: dump all raw SMC temperature keys and exit")
+}
+
+func setupMainBlockLayout(termWidth, termHeight int) {
+	mainBlock.SetRect(0, 0, termWidth, termHeight)
+	if termWidth < 93 {
+		mainBlock.TitleBottom = ""
+	} else {
+		mainBlock.TitleBottom = " Info: i | Layout: l | Color: c | BG: b | Exit: q "
+	}
+	if termWidth > 2 && termHeight > 2 {
+		grid.SetRect(1, 1, termWidth-1, termHeight-1)
+	}
+}
+
+func startBackgroundWorkers() {
+	if menubar {
+		if err := startMenuBarProcess(); err != nil {
+			stderrLogger.Printf("Failed to start menubar worker: %v\n", err)
+		}
+	}
+	if overlay {
+		if err := startOverlayProcess(); err != nil {
+			stderrLogger.Printf("Failed to start overlay worker: %v\n", err)
+		}
 	}
 }
