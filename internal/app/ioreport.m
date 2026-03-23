@@ -2008,8 +2008,12 @@ PowerMetrics samplePowerMetrics(int durationMs) {
   }
 
   // Only call readSocTemperature if HID didn't provide both CPU and GPU temps
+  float fallbackCpuTemp = 0.0f;
+  float fallbackGpuTemp = 0.0f;
   if (!gotCpuFromHID || !gotGpuFromHID) {
-    metrics.socTemp = readSocTemperature(&metrics.cpuTemp, &metrics.gpuTemp);
+    metrics.socTemp = readSocTemperature(&fallbackCpuTemp, &fallbackGpuTemp);
+    if (!gotCpuFromHID && fallbackCpuTemp > 0) metrics.cpuTemp = fallbackCpuTemp;
+    if (!gotGpuFromHID && fallbackGpuTemp > 0) metrics.gpuTemp = fallbackGpuTemp;
   } else {
     metrics.socTemp = (metrics.cpuTemp > metrics.gpuTemp) ? metrics.cpuTemp : metrics.gpuTemp;
   }
@@ -2035,12 +2039,9 @@ PowerMetrics samplePowerMetrics(int durationMs) {
   // Tiered caching: slow-changing sensors (Ambient, Board, SSD, VRM, etc.)
   // are only read from SMC every 5th tick to reduce IPC overhead.
   static int smcTempTick = 0;
-  static temp_sensor_t smcTempCache[512];
-  static int smcTempCacheCount = 0;
   int refreshSlowSensors = (smcTempTick % 5 == 0);  // Refresh every 5th tick
   smcTempTick++;
 
-  int newCacheCount = 0;
   for (int i = 0; i < g_all_temp_sensor_count && validSensorCount < 512; i++) {
     char k1 = g_all_temp_sensors[i].key[1];
 
@@ -2058,7 +2059,7 @@ PowerMetrics samplePowerMetrics(int durationMs) {
     int isSlowSensor = !isCoreKey;  // Ambient, Board, SSD, VRM, etc.
 
     float v;
-    if (isSlowSensor && !refreshSlowSensors && smcTempCacheCount > 0) {
+    if (isSlowSensor && !refreshSlowSensors && g_all_temp_sensors[i].value > 0.0f) {
       // Use cached value for slow-changing sensors between refreshes
       v = g_all_temp_sensors[i].value;  // Last known value
     } else if (g_smcConn) {

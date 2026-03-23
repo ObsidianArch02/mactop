@@ -297,7 +297,7 @@ static NSColor *overlayNeonGreen(void) {
   return [NSColor colorWithRed:0.15 green:1.0 blue:0.30 alpha:1.0];
 }
 static NSColor *overlayAccentGreen(void) {
-  return [NSColor colorWithRed:0.15 green:1.0 blue:0.30 alpha:1.0];
+  return overlayNeonGreen();
 }
 static NSColor *overlayAccentOrange(void) {
   return [NSColor colorWithRed:1.0 green:0.65 blue:0.10 alpha:1.0];
@@ -321,7 +321,7 @@ static NSColor *overlayDimText(void) {
   return [NSColor colorWithRed:0.10 green:0.75 blue:0.22 alpha:1.0];
 }
 static NSColor *overlayBrightText(void) {
-  return [NSColor colorWithRed:0.15 green:1.0 blue:0.30 alpha:1.0];
+  return overlayNeonGreen();
 }
 
 // ---------- Throughput formatter ----------

@@ -10,6 +10,10 @@ package app
 #include <mach/mach_init.h>
 #include <mach/mach_time.h>
 
+static inline time_t get_proc_starttime(struct kinfo_proc *kp) {
+    return kp->kp_proc.p_un.__p_starttime.tv_sec;
+}
+
 extern kern_return_t vm_deallocate(vm_map_t target_task, vm_address_t address, vm_size_t size);
 */
 import "C"
@@ -60,6 +64,7 @@ type ProcessTimeState struct {
 	Time      uint64
 	Timestamp time.Time
 	Command   string
+	CreateSec int64
 }
 
 var prevProcessTimes = make(map[int]ProcessTimeState)
@@ -79,10 +84,11 @@ func processOsProc(kp C.struct_kinfo_proc, now time.Time, prevProcessTimes map[i
 	}
 
 	comm := C.GoString(&kp.kp_proc.p_comm[0])
+	createSec := int64(C.get_proc_starttime(&kp))
 	
 	// Fast path: reuse full command name to avoid heavy proc_pidpath syscall on every tick.
 	// p_comm is a 16-byte truncation of the full name, so check if cached command starts with it.
-	if prevState, ok := prevProcessTimes[pid]; ok && prevState.Command != "" && strings.HasPrefix(prevState.Command, comm) {
+	if prevState, ok := prevProcessTimes[pid]; ok && prevState.CreateSec == createSec && prevState.Command != "" && strings.HasPrefix(prevState.Command, comm) {
 		comm = prevState.Command
 	} else {
 		var pathBuf [C.PROC_PIDPATHINFO_MAXSIZE]C.char
@@ -118,6 +124,7 @@ func processOsProc(kp C.struct_kinfo_proc, now time.Time, prevProcessTimes map[i
 		Time:      totalTimeNs,
 		Timestamp: now,
 		Command:   comm,
+		CreateSec: createSec,
 	}
 
 	memPercent := 0.0

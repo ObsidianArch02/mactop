@@ -578,13 +578,15 @@ func formatTempGroupLine(cat string, g *tempGroup, themeColor string) string {
 	}
 	// Pluralize core category names for display
 	displayName := cat
-	switch cat {
-	case "CPU E-Core":
-		displayName = "CPU E-Cores"
-	case "CPU P-Core":
-		displayName = "CPU P-Cores"
-	case "CPU S-Core":
-		displayName = "CPU S-Cores"
+	if g.count > 1 {
+		switch cat {
+		case "CPU E-Core":
+			displayName = "CPU E-Cores"
+		case "CPU P-Core":
+			displayName = "CPU P-Cores"
+		case "CPU S-Core":
+			displayName = "CPU S-Cores"
+		}
 	}
 	if g.count == 1 {
 		return fmt.Sprintf("  [%-16s](fg:%s)  [%s](fg:%s)",

@@ -388,6 +388,8 @@ func pushOverlayMetrics(sm SocMetrics, cpuMetrics CPUMetrics, gpuMetrics GPUMetr
 	}
 
 	if err := overlayMetricsEncoder.Encode(payload); err != nil {
+		overlayMetricsEncoder = nil
+
 		// Worker likely died — attempt restart with cooldown
 		if time.Since(overlayLastRestart) < 2*time.Second {
 			return // Too soon, skip this cycle
