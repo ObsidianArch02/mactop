@@ -203,7 +203,16 @@ static void parseFreqData(CFDataRef data, uint32_t *outFreqs, int *outCount) {
   for (int i = 0; i < totalEntries; i++) {
     uint32_t freq = 0;
     memcpy(&freq, bytes + (i * 8), 4);
-    uint32_t freqMHz = freq / 1000000;
+    uint32_t freqMHz;
+    if (freq >= 100000000) {
+      // Hz format (M1-M4): e.g. 4,000,000,000 -> 4000 MHz
+      freqMHz = freq / 1000000;
+    } else if (freq >= 100000) {
+      // kHz format (M5+): e.g. 4,608,000 -> 4608 MHz
+      freqMHz = freq / 1000;
+    } else {
+      freqMHz = 0;
+    }
     if (freqMHz > 0 && *outCount < 64) {
       outFreqs[(*outCount)++] = freqMHz;
     }
@@ -231,27 +240,47 @@ static void loadCpuFrequencies() {
       if (IORegistryEntryCreateCFProperties(
               entry, &properties, kCFAllocatorDefault, 0) == kIOReturnSuccess) {
 
-        CFDataRef eData = (CFDataRef)CFDictionaryGetValue(
-            properties, CFSTR("voltage-states1-sram"));
-        if (eData != NULL) {
-          parseFreqData(eData, g_ecpu_freqs, &g_ecpu_freq_count);
+        // E-Cluster: voltage-states1-sram (M1-M4), voltage-states9-sram (M5+)
+        if (g_ecpu_freq_count == 0) {
+          CFDataRef eData = (CFDataRef)CFDictionaryGetValue(
+              properties, CFSTR("voltage-states1-sram"));
+          if (eData != NULL) {
+            parseFreqData(eData, g_ecpu_freqs, &g_ecpu_freq_count);
+          }
+        }
+        if (g_ecpu_freq_count == 0) {
+          CFDataRef eData = (CFDataRef)CFDictionaryGetValue(
+              properties, CFSTR("voltage-states9-sram"));
+          if (eData != NULL) {
+            parseFreqData(eData, g_ecpu_freqs, &g_ecpu_freq_count);
+          }
         }
 
-        CFDataRef pData = (CFDataRef)CFDictionaryGetValue(
-            properties, CFSTR("voltage-states5-sram"));
-        if (pData != NULL) {
-          parseFreqData(pData, g_pcpu_freqs, &g_pcpu_freq_count);
-        } else {
-          // Try alternate for P-Cluster if 5 is missing (unlikely on M1/M2, but
-          // safe)
-          pData = (CFDataRef)CFDictionaryGetValue(
-              properties, CFSTR("voltage-states-sram")); // fallback?
+        // P-Cluster / S-Cluster (Super cores, M5+): voltage-states5-sram
+        if (g_pcpu_freq_count == 0) {
+          CFDataRef pData = (CFDataRef)CFDictionaryGetValue(
+              properties, CFSTR("voltage-states5-sram"));
           if (pData != NULL) {
             parseFreqData(pData, g_pcpu_freqs, &g_pcpu_freq_count);
           }
         }
 
-        // S-Cluster (Super cores, M5+): try voltage-states3-sram
+        // M-Cluster (M5+): voltage-states22-sram or voltage-states23-sram
+        if (g_scpu_freq_count == 0) {
+          CFDataRef mData = (CFDataRef)CFDictionaryGetValue(
+              properties, CFSTR("voltage-states22-sram"));
+          if (mData != NULL) {
+            parseFreqData(mData, g_scpu_freqs, &g_scpu_freq_count);
+          }
+        }
+        if (g_scpu_freq_count == 0) {
+          CFDataRef mData = (CFDataRef)CFDictionaryGetValue(
+              properties, CFSTR("voltage-states23-sram"));
+          if (mData != NULL) {
+            parseFreqData(mData, g_scpu_freqs, &g_scpu_freq_count);
+          }
+        }
+        // Fallback for S-Cluster: voltage-states3-sram (if 22/23 not found)
         if (g_scpu_freq_count == 0) {
           CFDataRef sData = (CFDataRef)CFDictionaryGetValue(
               properties, CFSTR("voltage-states3-sram"));
@@ -1566,7 +1595,13 @@ PowerMetrics samplePowerMetrics(int durationMs) {
                 if (sscanf(nameBuf, "V%d", &vIdx) == 1 && vIdx >= 0) {
                   if (isECluster && vIdx < g_ecpu_freq_count) {
                     freq = g_ecpu_freqs[vIdx];
-                  } else if ((isPCluster || isMCluster) && vIdx < g_pcpu_freq_count) {
+                  } else if (isMCluster && vIdx < g_scpu_freq_count) {
+                    // M5+ M-cluster: use dedicated table (voltage-states22-sram)
+                    freq = g_scpu_freqs[vIdx];
+                  } else if (isMCluster && vIdx < g_pcpu_freq_count) {
+                    // M-cluster fallback: use P table if M table not loaded
+                    freq = g_pcpu_freqs[vIdx];
+                  } else if (isPCluster && vIdx < g_pcpu_freq_count) {
                     freq = g_pcpu_freqs[vIdx];
                   } else if (isSCluster && vIdx < g_scpu_freq_count) {
                     freq = g_scpu_freqs[vIdx];
