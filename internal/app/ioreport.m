@@ -2054,7 +2054,7 @@ PowerMetrics samplePowerMetrics(int durationMs) {
     if (coveredByHID) continue;
 
     // Classify: silicon core sensors change rapidly, environmental sensors don't
-    int isCoreKey = (k1 == 'p' || k1 == 'e' || k1 == 'f' || k1 == 's' || k1 == 'S' ||
+    int isCoreKey = (k1 == 'p' || k1 == 'e' || k1 == 'f' || k1 == 's' ||
                      k1 == 'c' || k1 == 'C' || k1 == 'g' || k1 == 'R');
     int isSlowSensor = !isCoreKey;  // Ambient, Board, SSD, VRM, etc.
 
