@@ -160,13 +160,14 @@ type SocMetrics struct {
 }
 
 func initSocMetrics() error {
-	if ret := C.initIOReport(); ret != 0 {
-		return fmt.Errorf("initIOReport failed with code %d", ret)
-	}
 	// Pass expected core counts to C for HID sensor validation.
 	// HID per-core sensors are only used when count >= expected physical cores.
 	sysInfo := getSOCInfo()
 	C.setExpectedCoreCounts(C.int(sysInfo.ECoreCount), C.int(sysInfo.PCoreCount), C.int(sysInfo.SCoreCount))
+
+	if ret := C.initIOReport(); ret != 0 {
+		return fmt.Errorf("initIOReport failed with code %d", ret)
+	}
 	return nil
 }
 
