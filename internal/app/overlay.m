@@ -420,11 +420,12 @@ static NSInteger g_opacityFlashCountdown = 0; // Show opacity indicator for N fr
 // ---------- Drawing ----------
 
 static void drawMiniSparkline(double *data, int count, CGFloat x, CGFloat y,
-                              CGFloat w, CGFloat h, NSColor *color) {
+                              CGFloat w, CGFloat h, NSColor *color,
+                              double maxVal) {
   if (count < 2)
     return;
 
-  double maxVal = 100.0;
+  if (maxVal <= 0) maxVal = 100.0;
   NSBezierPath *fill = [NSBezierPath bezierPath];
   [fill moveToPoint:NSMakePoint(x, y + h)];
 
@@ -606,7 +607,7 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
         if (showSpark && sparkData) {
           drawMiniSparkline(sparkData, OVERLAY_SPARKLINE_HISTORY,
                             padX + contentW - sparkW - 48, y + 2, sparkW,
-                            sparkH, color);
+                            sparkH, color, 100.0);
         }
 
         // Value
@@ -654,12 +655,19 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
         withAttributes:fpsAttrs];
 
     // Full-width sparkline between label and value
+    // Auto-scale max to highest observed FPS (handles 120Hz+ ProMotion displays)
+    double fpsMax = 60.0;
+    for (int i = 0; i < OVERLAY_SPARKLINE_HISTORY; i++) {
+      if (fpsSparkHistory[i] > fpsMax) fpsMax = fpsSparkHistory[i];
+    }
+    fpsMax = ceil(fpsMax / 30.0) * 30.0; // Round up to nearest 30 (60/90/120/150/240)
+    if (fpsMax < 60.0) fpsMax = 60.0;
     CGFloat fpsLabelW = 50; // space for "FPS" label
     CGFloat fpsValW = fpsSize.width + 8; // space for value + gap
     CGFloat fpsSparkW = contentW - fpsLabelW - fpsValW;
     drawMiniSparkline(fpsSparkHistory, OVERLAY_SPARKLINE_HISTORY,
                       padX + fpsLabelW, y + 2, fpsSparkW,
-                      sparkH, overlayAccentCyan());
+                      sparkH, overlayAccentCyan(), fpsMax);
     y += rowH;
   }
 
