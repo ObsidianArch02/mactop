@@ -1162,19 +1162,27 @@ func updateNetDiskUI(netdiskMetrics NetDiskMetrics) {
 	netOut := formatBytes(netdiskMetrics.OutBytesPerSec, networkUnit)
 	netIn := formatBytes(netdiskMetrics.InBytesPerSec, networkUnit)
 
-	// Build network line with link speed info
-	linkInfo := ""
+	// Find fastest Ethernet link
+	var bestEth uint64
 	for _, eth := range ethInfo {
-		if eth.LinkUp && eth.LinkSpeedMbps > 0 {
-			linkInfo = FormatLinkSpeed(eth.LinkSpeedMbps)
-			break
+		if eth.LinkUp && eth.LinkSpeedMbps > bestEth {
+			bestEth = eth.LinkSpeedMbps
 		}
 	}
-	if linkInfo == "" && wifiInfo != nil && wifiInfo.IsConnected {
+
+	bestWifi := 0
+	if wifiInfo != nil && wifiInfo.IsConnected {
+		bestWifi = wifiInfo.TxRateMbps
+	}
+
+	linkInfo := ""
+	if bestEth > 0 && bestEth >= uint64(bestWifi) {
+		linkInfo = FormatLinkSpeed(bestEth)
+	} else if bestWifi > 0 {
 		if wifiInfo.WiFiGeneration != "" {
 			linkInfo = fmt.Sprintf("%s", wifiInfo.WiFiGeneration)
 		} else {
-			linkInfo = fmt.Sprintf("%dMbps", wifiInfo.TxRateMbps)
+			linkInfo = fmt.Sprintf("%dMbps", bestWifi)
 		}
 	}
 
