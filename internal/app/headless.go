@@ -108,6 +108,8 @@ type HeadlessOutput struct {
 	GPUMetrics            HeadlessGPUMetrics   `json:"gpu_metrics" yaml:"gpu_metrics" xml:"GPUMetrics" toon:"gpu_metrics"`
 	TFLOPsFP32            float64              `json:"tflops_fp32" yaml:"tflops_fp32" xml:"TFLOPsFP32" toon:"tflops_fp32"`
 	TFLOPsFP16            float64              `json:"tflops_fp16" yaml:"tflops_fp16" xml:"TFLOPsFP16" toon:"tflops_fp16"`
+	DisplayFPS            uint32               `json:"display_fps" yaml:"display_fps" xml:"DisplayFPS" toon:"display_fps"`
+	FrameIntervalMs       float64              `json:"frame_interval_ms" yaml:"frame_interval_ms" xml:"FrameIntervalMs" toon:"frame_interval_ms"`
 	CoreUsages            []float64            `json:"core_usages" yaml:"core_usages" xml:"CoreUsages" toon:"core_usages"`
 	SystemInfo            SystemInfo           `json:"system_info" yaml:"system_info" xml:"SystemInfo" toon:"system_info"`
 	ThermalState          string               `json:"thermal_state" yaml:"thermal_state" xml:"ThermalState" toon:"thermal_state"`
@@ -128,6 +130,10 @@ func runHeadless(count int) {
 		os.Exit(1)
 	}
 	defer cleanupSocMetrics()
+
+	// Start display FPS counter (gracefully no-ops if no display available)
+	StartDisplayFPSCounter()
+	defer StopDisplayFPSCounter()
 
 	startHeadlessPrometheus()
 
@@ -217,6 +223,7 @@ func printCSVHeader() {
 		"SCPU_Freq_MHz", "SCPU_Active",
 		"GPU_Usage",
 		"GPU_Freq_MHz", "GPU_Active_Percent",
+		"Display_FPS", "Frame_Interval_Ms",
 		"Mem_Used", "Mem_Total", "Swap_Used",
 		"Disk_Read_KB", "Disk_Write_KB",
 		"Net_In_Bytes", "Net_Out_Bytes",
@@ -341,6 +348,8 @@ func processHeadlessSample(format string, tbInfo *ThunderboltOutput, sysInfo Sys
 			fmt.Sprintf("%.2f", output.GPUUsage),
 			fmt.Sprintf("%d", output.GPUMetrics.FreqMHz),
 			fmt.Sprintf("%.2f", output.GPUMetrics.ActivePercent),
+			fmt.Sprintf("%d", output.DisplayFPS),
+			fmt.Sprintf("%.2f", output.FrameIntervalMs),
 			fmt.Sprintf("%d", output.Memory.Used),
 			fmt.Sprintf("%d", output.Memory.Total),
 			fmt.Sprintf("%d", output.Memory.SwapUsed),
@@ -520,6 +529,9 @@ func collectHeadlessData(tbInfo *ThunderboltOutput, sysInfo SystemInfo) Headless
 	orderedTemps := buildHeadlessTempGroups(m.TempSensors, sysInfo)
 	headlessFans := buildHeadlessFans(m.Fans)
 
+	// Get display FPS metrics
+	fpsMetrics := GetDisplayFPSMetrics()
+
 	output := HeadlessOutput{
 		Timestamp:             time.Now().Format(time.RFC3339),
 		SocMetrics:            m,
@@ -531,6 +543,8 @@ func collectHeadlessData(tbInfo *ThunderboltOutput, sysInfo SystemInfo) Headless
 		GPUMetrics:            HeadlessGPUMetrics{FreqMHz: int(m.GPUFreqMHz), ActivePercent: m.GPUActive},
 		TFLOPsFP32:            fp32TFLOPs,
 		TFLOPsFP16:            fp16TFLOPs,
+		DisplayFPS:            fpsMetrics.FPS,
+		FrameIntervalMs:       fpsMetrics.FrameIntervalMs,
 		CoreUsages:            percentages,
 		SystemInfo:            sysInfo,
 		Processes:             headlessProcesses,

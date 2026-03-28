@@ -154,6 +154,7 @@ mactop --headless --format toon
 - `--unit-temp`: Temperature unit: celsius, fahrenheit (default: celsius)
 - `--fan-control`: Enable interactive fan speed control (**⚠️ writes to SMC** — use with caution, may require sudo on some macOS versions)
 - `--menubar`: Run as a macOS menu bar status item alongside the TUI.
+- `--overlay`: Run as a floating overlay HUD window with FPS metrics.
 - `--version` or `-v`: Print the version of mactop.
 - `--help` or `-h`: Show a help message about these flags and how to run mactop.
 
