@@ -917,23 +917,55 @@ func finalizeCPUUI(totalUsage float64, coreUsages []float64, cpuMetrics CPUMetri
 	}
 }
 
+var lastEFreq, lastPFreq, lastSFreq int
+
+func formatCPUFreq(cpuMetrics CPUMetrics) string {
+	// Retain last known non-zero frequency so idle samples don't cause flicker
+	if cpuMetrics.EClusterFreqMHz > 0 {
+		lastEFreq = cpuMetrics.EClusterFreqMHz
+	}
+	if cpuMetrics.PClusterFreqMHz > 0 {
+		lastPFreq = cpuMetrics.PClusterFreqMHz
+	}
+	if cpuMetrics.SClusterFreqMHz > 0 {
+		lastSFreq = cpuMetrics.SClusterFreqMHz
+	}
+	if lastEFreq <= 0 && lastPFreq <= 0 {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	if lastEFreq > 0 {
+		parts = append(parts, fmt.Sprintf("E%.1f", float64(lastEFreq)/1000.0))
+	}
+	if lastPFreq > 0 {
+		parts = append(parts, fmt.Sprintf("P%.1f", float64(lastPFreq)/1000.0))
+	}
+	if lastSFreq > 0 {
+		parts = append(parts, fmt.Sprintf("S%.1f", float64(lastSFreq)/1000.0))
+	}
+	return " @ " + strings.Join(parts, "/") + " GHz"
+}
+
 func updateCPUGaugeTitles(totalUsage float64, cpuMetrics CPUMetrics) {
 	coreSummary := FormatCoreSummary(cpuCoreWidget.eCoreCount, cpuCoreWidget.pCoreCount, cpuCoreWidget.sCoreCount)
 	totalCPUCores := cpuCoreWidget.eCoreCount + cpuCoreWidget.pCoreCount + cpuCoreWidget.sCoreCount
+	cpuFreqStr := formatCPUFreq(cpuMetrics)
 	if isCompactLayout() {
-		cpuGauge.Title = fmt.Sprintf("CPU %.0f%% %s", totalUsage, formatTemp(cpuMetrics.CPUTemp))
+		cpuGauge.Title = fmt.Sprintf("CPU %.0f%%%s %s", totalUsage, cpuFreqStr, formatTemp(cpuMetrics.CPUTemp))
 	} else {
-		cpuGauge.Title = fmt.Sprintf("%d Cores %s %.2f%% (%s)",
+		cpuGauge.Title = fmt.Sprintf("%d Cores %s %.2f%%%s (%s)",
 			totalCPUCores,
 			coreSummary,
 			totalUsage,
+			cpuFreqStr,
 			formatTemp(cpuMetrics.CPUTemp),
 		)
 	}
-	cpuCoreWidget.Title = fmt.Sprintf("%d Cores %s %.2f%% (%s)",
+	cpuCoreWidget.Title = fmt.Sprintf("%d Cores %s %.2f%%%s (%s)",
 		totalCPUCores,
 		coreSummary,
 		totalUsage,
+		cpuFreqStr,
 		formatTemp(cpuMetrics.CPUTemp),
 	)
 	aneUtil := float64(cpuMetrics.ANEW / 1 / 8.0 * 100)

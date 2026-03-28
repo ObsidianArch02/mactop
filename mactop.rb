@@ -5,25 +5,18 @@
 class Mactop < Formula
   desc "Apple Silicon Monitor Top written in Go Lang"
   homepage "https://github.com/metaspartan/mactop"
-  version "2.0.7"
+  version "2.1.1"
+
+  depends_on "macos"
   depends_on :macos
 
   if Hardware::CPU.arm?
-    url "https://github.com/metaspartan/mactop/releases/download/v2.0.7/mactop_2.0.7_darwin_arm64.tar.gz"
-    sha256 "0374aa0f80fa5e2ace6581f62ca6838e3dbd8e7dbe1beaa8f6d249ec87e58633"
+    url "https://github.com/metaspartan/mactop/releases/download/v2.1.1/mactop_2.1.1_darwin_arm64.tar.gz"
+    sha256 "7b9be25e9c1e8f7c69b6ca8590bf10ac466a045cdc4144c45d606d0bd6f094d4"
 
-    def install
+    define_method(:install) do
       bin.install "mactop"
     end
-  end
-
-  def service
-    run [opt_bin/"mactop", "-p", "9101", "--headless"]
-    keep_alive true
-    log_path var/"log/mactop.log"
-    error_log_path var/"log/mactop.error.log"
-    process_type :background
-    nice 10
   end
 
   def caveats
@@ -48,5 +41,14 @@ class Mactop < Formula
       Or run manually with a custom port:
         mactop -p <PORT> --headless
     EOS
+  end
+
+  service do
+    run [opt_bin/"mactop", "-p", "9101", "--headless"]
+    keep_alive true
+    log_path var/"log/mactop.log"
+    error_log_path var/"log/mactop.error.log"
+    process_type :background
+    nice 10
   end
 end
