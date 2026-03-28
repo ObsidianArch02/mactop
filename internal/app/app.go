@@ -1299,8 +1299,6 @@ func parseCommandLineFlags() {
 	flag.IntVar(&updateInterval, "i", 1000, "Update interval in milliseconds")
 	flag.Bool("d", false, "Dump all available IOReport channels and exit")
 	flag.Bool("dump-ioreport", false, "Dump all available IOReport channels and exit")
-	// Register --foreground so flag.Parse() can catch assignments like --foreground=green.
-	// Space-separated assignments (--foreground green) are consumed by handleLegacyFlags().
 	flag.StringVar(&cliFgColor, "foreground", "", "Set the UI foreground color (named or hex, e.g., green, #9580FF)")
 	flag.StringVar(&cliBgColor, "bg", "", "Set the UI background color (named or hex, e.g., mocha-base, #22212C)")
 	flag.StringVar(&cliBgColor, "background", "", "Set the UI background color (alias for --bg)")
