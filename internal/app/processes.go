@@ -10,6 +10,10 @@ package app
 #include <mach/mach_init.h>
 #include <mach/mach_time.h>
 
+static inline time_t get_proc_starttime(struct kinfo_proc *kp) {
+    return kp->kp_proc.p_un.__p_starttime.tv_sec;
+}
+
 extern kern_return_t vm_deallocate(vm_map_t target_task, vm_address_t address, vm_size_t size);
 */
 import "C"
@@ -59,6 +63,8 @@ func getUsername(uid uint32) string {
 type ProcessTimeState struct {
 	Time      uint64
 	Timestamp time.Time
+	Command   string
+	CreateSec int64
 }
 
 var prevProcessTimes = make(map[int]ProcessTimeState)
@@ -78,10 +84,18 @@ func processOsProc(kp C.struct_kinfo_proc, now time.Time, prevProcessTimes map[i
 	}
 
 	comm := C.GoString(&kp.kp_proc.p_comm[0])
-	var pathBuf [C.PROC_PIDPATHINFO_MAXSIZE]C.char
-	if C.proc_pidpath(C.int(pid), unsafe.Pointer(&pathBuf), C.PROC_PIDPATHINFO_MAXSIZE) > 0 {
-		fullPath := C.GoString(&pathBuf[0])
-		comm = filepath.Base(fullPath)
+	createSec := int64(C.get_proc_starttime(&kp))
+
+	// Fast path: reuse full command name to avoid heavy proc_pidpath syscall on every tick.
+	// p_comm is a 16-byte truncation of the full name, so check if cached command starts with it.
+	if prevState, ok := prevProcessTimes[pid]; ok && prevState.CreateSec == createSec && prevState.Command != "" && strings.HasPrefix(prevState.Command, comm) {
+		comm = prevState.Command
+	} else {
+		var pathBuf [C.PROC_PIDPATHINFO_MAXSIZE]C.char
+		if C.proc_pidpath(C.int(pid), unsafe.Pointer(&pathBuf), C.PROC_PIDPATHINFO_MAXSIZE) > 0 {
+			fullPath := C.GoString(&pathBuf[0])
+			comm = filepath.Base(fullPath)
+		}
 	}
 
 	rssBytes := int64(0)
@@ -109,6 +123,8 @@ func processOsProc(kp C.struct_kinfo_proc, now time.Time, prevProcessTimes map[i
 	newState := ProcessTimeState{
 		Time:      totalTimeNs,
 		Timestamp: now,
+		Command:   comm,
+		CreateSec: createSec,
 	}
 
 	memPercent := 0.0
@@ -116,21 +132,7 @@ func processOsProc(kp C.struct_kinfo_proc, now time.Time, prevProcessTimes map[i
 		memPercent = (float64(rssBytes) / float64(totalMem)) * 100.0
 	}
 
-	state := ""
-	switch kp.kp_proc.p_stat {
-	case C.SIDL:
-		state = "I"
-	case C.SRUN:
-		state = "R"
-	case C.SSLEEP:
-		state = "S"
-	case C.SSTOP:
-		state = "T"
-	case C.SZOMB:
-		state = "Z"
-	default:
-		state = "?"
-	}
+	state := processStateString(kp.kp_proc.p_stat)
 
 	uid := uint32(kp.kp_eproc.e_ucred.cr_uid)
 	user := getUsername(uid)
@@ -152,6 +154,23 @@ func processOsProc(kp C.struct_kinfo_proc, now time.Time, prevProcessTimes map[i
 		LastUpdated: now,
 	}
 	return pm, pid, newState, true
+}
+
+func processStateString(stat C.char) string {
+	switch stat {
+	case C.SIDL:
+		return "I"
+	case C.SRUN:
+		return "R"
+	case C.SSLEEP:
+		return "S"
+	case C.SSTOP:
+		return "T"
+	case C.SZOMB:
+		return "Z"
+	default:
+		return "?"
+	}
 }
 
 func getProcessList(systemGpuPercent float64) ([]ProcessMetrics, error) {

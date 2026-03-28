@@ -84,7 +84,7 @@ typedef struct {
     int fanCount;
     fan_info_t fans[8];
     int tempSensorCount;
-    temp_sensor_t temps[128];
+    temp_sensor_t temps[512];
 } PowerMetrics;
 
 int initIOReport();
@@ -94,6 +94,9 @@ int getThermalState();
 extern void debugIOReport(void);
 extern void printAllChannels(void);
 extern void debugMonitorChannels(int durationMs);
+extern void dumpAllSMCTemps(void);
+extern void dumpIOReportDebug(void);
+extern void setExpectedCoreCounts(int eCores, int pCores, int sCores);
 int setFanForceTest(int enabled);
 int setFanMode(int fanIndex, int mode);
 int setFanTarget(int fanIndex, int rpm);
@@ -157,10 +160,20 @@ type SocMetrics struct {
 }
 
 func initSocMetrics() error {
+	// Pass expected core counts to C for HID sensor validation.
+	// HID per-core sensors are only used when count >= expected physical cores.
+	sysInfo := getSOCInfo()
+	C.setExpectedCoreCounts(C.int(sysInfo.ECoreCount), C.int(sysInfo.PCoreCount), C.int(sysInfo.SCoreCount))
+
 	if ret := C.initIOReport(); ret != 0 {
 		return fmt.Errorf("initIOReport failed with code %d", ret)
 	}
 	return nil
+}
+
+// DumpIOReportDebug runs the standalone diagnostic dump (works even if initIOReport fails).
+func DumpIOReportDebug() {
+	C.dumpIOReportDebug()
 }
 
 func sampleSocMetrics(durationMs int) SocMetrics {
@@ -190,7 +203,7 @@ func sampleSocMetrics(durationMs int) SocMetrics {
 
 	// Convert temp sensor data from C arrays to Go slices
 	tempSensors := make([]TempSensor, int(pm.tempSensorCount))
-	for i := 0; i < int(pm.tempSensorCount) && i < 128; i++ {
+	for i := 0; i < int(pm.tempSensorCount) && i < 512; i++ {
 		ct := pm.temps[i]
 		tempSensors[i] = TempSensor{
 			Key:   C.GoString(&ct.key[0]),
@@ -273,6 +286,11 @@ func ResetFansToAuto() error {
 // DebugIOReport prints all available IOReport channels and groups to stdout
 func DebugIOReport() {
 	C.debugIOReport()
+}
+
+// DumpAllSMCTemps prints all SMC temperature keys with raw values for diagnostics
+func DumpAllSMCTemps() {
+	C.dumpAllSMCTemps()
 }
 
 // WiFiLinkInfo represents Wi-Fi interface link information
