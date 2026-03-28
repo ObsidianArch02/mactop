@@ -556,8 +556,35 @@ func initializeTheme(colorName string, setColor bool, interval int, setInterval 
 // runAlternateMode checks for non-TUI modes and runs them.
 // Returns true if an alternate mode was handled (caller should return).
 func runAlternateMode() bool {
+	if dumpTemps {
+		if err := initSocMetrics(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to initialize metrics: %v\n", err)
+			os.Exit(1)
+		}
+		defer cleanupSocMetrics()
+		sysInfo := getSOCInfo()
+		fmt.Printf("System: %s\n", sysInfo.Name)
+		fmt.Printf("Cores: %d E + %d P + %d S = %d total\n",
+			sysInfo.ECoreCount, sysInfo.PCoreCount, sysInfo.SCoreCount, sysInfo.CoreCount)
+		fmt.Printf("GPU Cores: %d\n\n", sysInfo.GPUCoreCount)
+		DumpAllSMCTemps()
+		return true
+	}
+	if dumpDebug {
+		sysInfo := getSOCInfo()
+		fmt.Printf("System: %s\n", sysInfo.Name)
+		fmt.Printf("Cores: %d E + %d P + %d S = %d total\n",
+			sysInfo.ECoreCount, sysInfo.PCoreCount, sysInfo.SCoreCount, sysInfo.CoreCount)
+		fmt.Printf("GPU Cores: %d\n\n", sysInfo.GPUCoreCount)
+		DumpIOReportDebug()
+		return true
+	}
 	if menubarWorker {
 		startMenuBarWorker()
+		return true
+	}
+	if overlayWorker {
+		startOverlayWorker()
 		return true
 	}
 	if headless {
@@ -623,26 +650,7 @@ func Run() {
 	}
 	defer logfile.Close()
 
-	flag.StringVar(&prometheusPort, "prometheus", "", "Port to run Prometheus metrics server on (e.g. :9090)")
-	flag.StringVar(&prometheusPort, "p", "", "Port to run Prometheus metrics server on (e.g. :9090)")
-	flag.BoolVar(&headless, "headless", false, "Run in headless mode (no TUI, output JSON to stdout)")
-	flag.BoolVar(&headlessPretty, "pretty", false, "Pretty print output in headless mode")
-	flag.IntVar(&headlessCount, "count", 0, "Number of samples to collect in headless mode (0 = infinite)")
-	flag.StringVar(&headlessFormat, "format", "json", "Output format for headless mode: json, yaml, xml, csv, toon")
-	flag.IntVar(&updateInterval, "interval", 1000, "Update interval in milliseconds")
-	flag.IntVar(&updateInterval, "i", 1000, "Update interval in milliseconds")
-	flag.Bool("d", false, "Dump all available IOReport channels and exit")
-	flag.Bool("dump-ioreport", false, "Dump all available IOReport channels and exit")
-	flag.StringVar(&colorName, "foreground", "", "Set the UI foreground color (named or hex, e.g., green, #9580FF)")
-	flag.StringVar(&cliBgColor, "bg", "", "Set the UI background color (named or hex, e.g., mocha-base, #22212C)")
-	flag.StringVar(&cliBgColor, "background", "", "Set the UI background color (alias for --bg)")
-	flag.StringVar(&networkUnit, "unit-network", "auto", "Network unit: auto, byte, kb, mb, gb")
-	flag.StringVar(&diskUnit, "unit-disk", "auto", "Disk unit: auto, byte, kb, mb, gb")
-	flag.StringVar(&tempUnit, "unit-temp", "celsius", "Temperature unit: celsius, fahrenheit")
-	flag.BoolVar(&menubar, "menubar", false, "Run as a macOS menu bar status item (no TUI)")
-	flag.BoolVar(&menubarWorker, "menubar-worker", false, "Internal: Run as menu bar worker process")
-	flag.IntVar(&filterPID, "pid", 0, "Monitor a specific process by PID")
-	flag.BoolVar(&fanControl, "fan-control", false, "Enable interactive fan speed control (⚠️  writes to SMC)")
+	parseCommandLineFlags()
 
 	loadConfig()
 
@@ -653,6 +661,16 @@ func Run() {
 	sortReverse = currentConfig.SortReverse
 
 	flag.Parse()
+
+	// If cli.go didn't catch --foreground (e.g., because it used an '=' sign like --foreground=green)
+	// then flag.Parse() will have populated cliFgColor. Update colorName and setColor.
+	if !setColor && cliFgColor != "" {
+		if !IsHexColor(cliFgColor) {
+			cliFgColor = strings.ToLower(cliFgColor)
+		}
+		colorName = cliFgColor
+		setColor = true
+	}
 
 	currentUser = os.Getenv("USER")
 
@@ -683,27 +701,14 @@ func Run() {
 	initializeTheme(colorName, setColor, interval, setInterval)
 	setupGrid()
 	termWidth, termHeight := ui.TerminalDimensions()
-	mainBlock.SetRect(0, 0, termWidth, termHeight)
-	if termWidth < 93 {
-		mainBlock.TitleBottom = ""
-	} else {
-		mainBlock.TitleBottom = " Info: i | Layout: l | Color: c | BG: b | Exit: q "
-	}
-	if termWidth > 2 && termHeight > 2 {
-		grid.SetRect(1, 1, termWidth-1, termHeight-1)
-	}
+	setupMainBlockLayout(termWidth, termHeight)
 	renderUI()
 
 	seedInitialMetrics()
 
 	triggerProcessCollectionChan := make(chan struct{}, 1)
 
-	// In multi-process mode, we spawn the worker here if --menubar is set on the parent
-	if menubar {
-		if err := startMenuBarProcess(); err != nil {
-			stderrLogger.Printf("Failed to start menubar worker: %v\n", err)
-		}
-	}
+	startBackgroundWorkers()
 
 	go collectMetrics(done, cpuMetricsChan, gpuMetricsChan, tbNetStatsChan, triggerProcessCollectionChan)
 	go collectProcessMetrics(done, processMetricsChan, triggerProcessCollectionChan)
@@ -802,17 +807,11 @@ func updateTotalPowerChart(watts float64) {
 }
 
 func updateCPUUI(cpuMetrics CPUMetrics) {
-	coreUsages, err := GetCPUPercentages()
-	if err != nil {
-		stderrLogger.Printf("Error getting CPU percentages: %v\n", err)
-		return
+	if len(cpuMetrics.CoreUsages) > 0 {
+		cpuCoreWidget.UpdateUsage(cpuMetrics.CoreUsages)
 	}
-	cpuCoreWidget.UpdateUsage(coreUsages)
-	var totalUsage float64
-	for _, usage := range coreUsages {
-		totalUsage += usage
-	}
-	totalUsage /= float64(len(coreUsages))
+
+	totalUsage := cpuMetrics.AvgUsage
 	cpuGauge.Percent = int(totalUsage)
 
 	updateCPUHistory(totalUsage)
@@ -828,7 +827,9 @@ func updateCPUUI(cpuMetrics CPUMetrics) {
 	memoryGauge.Percent = int(memoryPercent)
 
 	updateMemoryHistory(memoryMetrics)
-	finalizeCPUUI(totalUsage, coreUsages, cpuMetrics, memoryMetrics)
+	if len(cpuMetrics.CoreUsages) > 0 {
+		finalizeCPUUI(totalUsage, cpuMetrics.CoreUsages, cpuMetrics, memoryMetrics)
+	}
 }
 
 func updateCPUHistory(totalUsage float64) {
@@ -1193,19 +1194,27 @@ func updateNetDiskUI(netdiskMetrics NetDiskMetrics) {
 	netOut := formatBytes(netdiskMetrics.OutBytesPerSec, networkUnit)
 	netIn := formatBytes(netdiskMetrics.InBytesPerSec, networkUnit)
 
-	// Build network line with link speed info
-	linkInfo := ""
+	// Find fastest Ethernet link
+	var bestEth uint64
 	for _, eth := range ethInfo {
-		if eth.LinkUp && eth.LinkSpeedMbps > 0 {
-			linkInfo = FormatLinkSpeed(eth.LinkSpeedMbps)
-			break
+		if eth.LinkUp && eth.LinkSpeedMbps > bestEth {
+			bestEth = eth.LinkSpeedMbps
 		}
 	}
-	if linkInfo == "" && wifiInfo != nil && wifiInfo.IsConnected {
+
+	bestWifi := 0
+	if wifiInfo != nil && wifiInfo.IsConnected {
+		bestWifi = wifiInfo.TxRateMbps
+	}
+
+	linkInfo := ""
+	if bestEth > 0 && bestEth >= uint64(bestWifi) {
+		linkInfo = FormatLinkSpeed(bestEth)
+	} else if bestWifi > 0 {
 		if wifiInfo.WiFiGeneration != "" {
 			linkInfo = fmt.Sprintf("%s", wifiInfo.WiFiGeneration)
 		} else {
-			linkInfo = fmt.Sprintf("%dMbps", wifiInfo.TxRateMbps)
+			linkInfo = fmt.Sprintf("%dMbps", bestWifi)
 		}
 	}
 
@@ -1316,5 +1325,59 @@ func updateTBNetUI(tbStats []ThunderboltNetStats) {
 		rdmaAvailable.Set(1)
 	} else {
 		rdmaAvailable.Set(0)
+	}
+}
+
+func parseCommandLineFlags() {
+	flag.StringVar(&prometheusPort, "prometheus", "", "Port to run Prometheus metrics server on (e.g. :9090)")
+	flag.StringVar(&prometheusPort, "p", "", "Port to run Prometheus metrics server on (e.g. :9090)")
+	flag.BoolVar(&headless, "headless", false, "Run in headless mode (no TUI, output JSON to stdout)")
+	flag.BoolVar(&headlessPretty, "pretty", false, "Pretty print output in headless mode")
+	flag.IntVar(&headlessCount, "count", 0, "Number of samples to collect in headless mode (0 = infinite)")
+	flag.StringVar(&headlessFormat, "format", "json", "Output format for headless mode: json, yaml, xml, csv, toon")
+	flag.IntVar(&updateInterval, "interval", 1000, "Update interval in milliseconds")
+	flag.IntVar(&updateInterval, "i", 1000, "Update interval in milliseconds")
+	flag.Bool("d", false, "Dump all available IOReport channels and exit")
+	flag.Bool("dump-ioreport", false, "Dump all available IOReport channels and exit")
+	flag.StringVar(&cliFgColor, "foreground", "", "Set the UI foreground color (named or hex, e.g., green, #9580FF)")
+	flag.StringVar(&cliBgColor, "bg", "", "Set the UI background color (named or hex, e.g., mocha-base, #22212C)")
+	flag.StringVar(&cliBgColor, "background", "", "Set the UI background color (alias for --bg)")
+	flag.StringVar(&networkUnit, "unit-network", "auto", "Network unit: auto, byte, kb, mb, gb")
+	flag.StringVar(&diskUnit, "unit-disk", "auto", "Disk unit: auto, byte, kb, mb, gb")
+	flag.StringVar(&tempUnit, "unit-temp", "celsius", "Temperature unit: celsius, fahrenheit")
+	flag.BoolVar(&menubar, "menubar", false, "Run as macOS menu bar status item (no TUI)")
+	flag.BoolVar(&menubarWorker, "menubar-worker", false, "Internal: Run as menu bar worker process")
+	flag.BoolVar(&overlay, "overlay", false, "Show floating overlay HUD window on top of all apps")
+	flag.BoolVar(&overlayWorker, "overlay-worker", false, "Internal: Run as overlay worker process")
+	flag.StringVar(&overlaySections, "overlay-sections", "", "Comma-separated visible sections for overlay (e.g. cpu,gpu,memory)")
+	flag.Float64Var(&overlayOpacity, "overlay-opacity", 0.88, "Overlay window opacity (0.15-1.0)")
+	flag.IntVar(&filterPID, "pid", 0, "Monitor a specific process by PID")
+	flag.BoolVar(&fanControl, "fan-control", false, "Enable interactive fan speed control (⚠️  writes to SMC)")
+	flag.BoolVar(&dumpTemps, "dump-temps", false, "Diagnostic: dump all raw SMC temperature keys and exit")
+	flag.BoolVar(&dumpDebug, "dump-debug", false, "Diagnostic: dump IOReport/HID/SMC/NVMe debug info and exit")
+}
+
+func setupMainBlockLayout(termWidth, termHeight int) {
+	mainBlock.SetRect(0, 0, termWidth, termHeight)
+	if termWidth < 93 {
+		mainBlock.TitleBottom = ""
+	} else {
+		mainBlock.TitleBottom = " Info: i | Layout: l | Color: c | BG: b | Exit: q "
+	}
+	if termWidth > 2 && termHeight > 2 {
+		grid.SetRect(1, 1, termWidth-1, termHeight-1)
+	}
+}
+
+func startBackgroundWorkers() {
+	if menubar {
+		if err := startMenuBarProcess(); err != nil {
+			stderrLogger.Printf("Failed to start menubar worker: %v\n", err)
+		}
+	}
+	if overlay {
+		if err := startOverlayProcess(); err != nil {
+			stderrLogger.Printf("Failed to start overlay worker: %v\n", err)
+		}
 	}
 }

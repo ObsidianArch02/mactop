@@ -3,7 +3,7 @@
 package app
 
 /*
-#cgo CFLAGS: -x objective-c
+#cgo CFLAGS: -x objective-c -fobjc-arc
 #cgo LDFLAGS: -framework Cocoa
 
 typedef struct {
@@ -270,7 +270,12 @@ func updateMenuBarFromPayload(p MenuBarMetricsPayload) {
 	// CPU Loading
 	cm.cpu_percent = C.double(p.CPUPercent)
 	cm.gpu_percent = C.double(p.GPUMetrics.ActivePercent)
-	cm.ane_percent = C.double(p.CPUMetrics.ANEW / 8.0 * 100) // Power-based estimation (same as TUI)
+
+	anePct := p.CPUMetrics.ANEW / 8.0 * 100
+	if anePct > 100 {
+		anePct = 100
+	}
+	cm.ane_percent = C.double(anePct) // Power-based estimation (same as TUI)
 
 	cm.mem_used_bytes = C.ulonglong(p.MemMetrics.Used)
 	cm.mem_total_bytes = C.ulonglong(p.MemMetrics.Total)

@@ -372,10 +372,7 @@ func fanRPMBar(fan FanInfo, themeColor string) []string {
 	}
 
 	barWidth := 20
-	filled := int(pct / 100.0 * float64(barWidth))
-	if filled > barWidth {
-		filled = barWidth
-	}
+	filled := min(int(pct/100.0*float64(barWidth)), barWidth)
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
 
 	rpmColor := themeColor
@@ -394,10 +391,11 @@ func fanRPMBar(fan FanInfo, themeColor string) []string {
 }
 
 // sensorGroupMap maps SMC key second character to group category.
+// Note: 's' is handled conditionally in sensorGroupName (SSD on M1-M4, S-Core on M5+).
 var sensorGroupMap = map[byte]string{
 	'p': "CPU P-Core", 'e': "CPU E-Core", 'f': "CPU P-Core",
 	'g': "GPU", 'C': "CPU Core", 'c': "CPU Core",
-	'm': "Memory", 'M': "Memory", 's': "SSD", 'S': "SSD",
+	'm': "Memory", 'M': "Memory", 'S': "SSD",
 	'H': "NAND", 'N': "NAND",
 	'a': "Ambient", 'A': "Ambient", 'F': "Ambient",
 	'B': "Board", 'b': "Board",
@@ -407,27 +405,71 @@ var sensorGroupMap = map[byte]string{
 	'D': "Display", 'd': "Display", 'L': "Display",
 }
 
+// getNonSMCSensorGroup handles synthetic sensor keys that don't start with 'T'.
+// Returns group name or empty string if not a known non-SMC key.
+func getNonSMCSensorGroup(key string) string {
+	switch key[0] {
+	case 'H': // HID synthetic keys from IOHIDEventSystemClient
+		switch key[1] {
+		case 'e':
+			return "CPU E-Core"
+		case 'p':
+			return "CPU P-Core"
+		case 's':
+			return "CPU S-Core"
+		case 'g':
+			return "GPU"
+		}
+	case 'N': // NVMe SMART sensors use 'Nv' prefix
+		if key[1] == 'v' {
+			return "NVMe"
+		}
+	}
+	return ""
+}
+
 // sensorGroupName returns the group category for a sensor based on its SMC key.
 func sensorGroupName(key string) string {
-	if len(key) < 2 || key[0] != 'T' {
+	if len(key) < 2 {
+		return "Other"
+	}
+	if key[0] != 'T' {
+		if group := getNonSMCSensorGroup(key); group != "" {
+			return group
+		}
 		return "Other"
 	}
 	// Multi-char prefix matching for Apple Silicon specifics
 	if len(key) >= 3 {
-		if (key[1] == 'P' && (key[2] == 'D' || key[2] == 'M' || key[2] == 'S')) || key[1] == 'R' && key[2] == 'D' {
-			if key[1] == 'R' {
-				return "GPU"
-			}
-			return "SoC Package"
+		if group := getAppleSiliconSensorGroup(key); group != "" {
+			return group
 		}
-		if key[1] == 'C' && (key[2] == 'M' || key[2] == 'D') {
-			return "CPU Die"
+	}
+	// Conditional: 's' = CPU S-Core on M5+ (has S-cores), SSD on M1-M4
+	if key[1] == 's' {
+		if cachedSystemInfo.SCoreCount > 0 {
+			return "CPU S-Core"
 		}
+		return "SSD"
 	}
 	if group, ok := sensorGroupMap[key[1]]; ok {
 		return group
 	}
 	return "Other"
+}
+
+// getAppleSiliconSensorGroup is a helper to reduce cyclomatic complexity
+func getAppleSiliconSensorGroup(key string) string {
+	if (key[1] == 'P' && (key[2] == 'D' || key[2] == 'M' || key[2] == 'S')) || key[1] == 'R' && key[2] == 'D' {
+		if key[1] == 'R' {
+			return "GPU"
+		}
+		return "SoC Package"
+	}
+	if key[1] == 'C' && (key[2] == 'M' || key[2] == 'D') {
+		return "CPU Die"
+	}
+	return ""
 }
 
 // classifyCPUCoreSensors splits generic "CPU Core" sensors into E-Core, P-Core,
@@ -482,14 +524,20 @@ func buildGroupedTempLines(sensors []TempSensor, themeColor string) []string {
 	// Classify generic CPU Core sensors into E/P/S before grouping
 	sensors = classifyCPUCoreSensors(sensors, cachedSystemInfo)
 
-	// Group sensors by category (using key-based group name for proper merging)
+	// Group sensors by BASE category — always show grouped averages,
+	// never individual per-core lines. Consistent across all chips.
 	groups := make(map[string]*tempGroup)
 	var groupOrder []string
 	for _, s := range sensors {
 		cat := sensorGroupName(s.Key)
-		// For classified CPU sensors, use the reclassified Name
-		if strings.HasPrefix(s.Name, "CPU E-Core") || strings.HasPrefix(s.Name, "CPU P-Core") || strings.HasPrefix(s.Name, "CPU S-Core") {
-			cat = s.Name
+		// For classified/HID CPU core sensors, merge into base category
+		// (e.g., "CPU E-Core" not "CPU E-Core 04") for consistent grouping
+		if strings.HasPrefix(s.Name, "CPU E-Core") {
+			cat = "CPU E-Core"
+		} else if strings.HasPrefix(s.Name, "CPU P-Core") {
+			cat = "CPU P-Core"
+		} else if strings.HasPrefix(s.Name, "CPU S-Core") {
+			cat = "CPU S-Core"
 		}
 		g, exists := groups[cat]
 		if !exists {
@@ -510,7 +558,7 @@ func buildGroupedTempLines(sensors []TempSensor, themeColor string) []string {
 	// Preferred display order — most important first
 	preferred := []string{
 		"CPU E-Core", "CPU P-Core", "CPU S-Core", "CPU Core", "CPU Die",
-		"GPU", "SoC Package", "Memory", "SSD", "NAND",
+		"GPU", "SoC Package", "Memory", "SSD", "NAND", "NVMe",
 		"Ambient", "VRM", "Board", "Thunderbolt",
 		"Wireless", "Display",
 	}
@@ -553,12 +601,24 @@ func formatTempGroupLine(cat string, g *tempGroup, themeColor string) string {
 	} else if avg > 70 {
 		tempColor = "yellow"
 	}
+	// Pluralize core category names for display
+	displayName := cat
+	if g.count > 1 {
+		switch cat {
+		case "CPU E-Core":
+			displayName = "CPU E-Cores"
+		case "CPU P-Core":
+			displayName = "CPU P-Cores"
+		case "CPU S-Core":
+			displayName = "CPU S-Cores"
+		}
+	}
 	if g.count == 1 {
 		return fmt.Sprintf("  [%-16s](fg:%s)  [%s](fg:%s)",
-			cat, themeColor, formatTemp(avg), tempColor)
+			displayName, themeColor, formatTemp(avg), tempColor)
 	}
 	return fmt.Sprintf("  [%-16s](fg:%s)  [%s](fg:%s)  [avg of %d, %s – %s](fg:%s)",
-		cat, themeColor, formatTemp(avg), tempColor,
+		displayName, themeColor, formatTemp(avg), tempColor,
 		g.count, formatTemp(g.min), formatTemp(g.max), themeColor)
 }
 

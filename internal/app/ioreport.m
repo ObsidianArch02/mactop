@@ -6,6 +6,7 @@
 #import <CoreWLAN/CoreWLAN.h>
 #import <Foundation/Foundation.h>
 #import <IOKit/IOKitLib.h>
+#import <IOKit/IOCFPlugIn.h>
 #include <mach/mach_host.h>
 #include <mach/mach_init.h>
 #include <mach/processor_info.h>
@@ -185,8 +186,47 @@ static uint32_t g_scpu_freqs[64];
 static int g_scpu_freq_count = 0;
 
 // All discovered temperature sensors
-static temp_sensor_t g_all_temp_sensors[128];
+static temp_sensor_t g_all_temp_sensors[512];
 static int g_all_temp_sensor_count = 0;
+
+// Expected physical core counts (set from Go via setExpectedCoreCounts)
+static int g_expected_ecores = 0;
+static int g_expected_pcores = 0;
+static int g_expected_scores = 0;
+
+void setExpectedCoreCounts(int eCores, int pCores, int sCores) {
+  g_expected_ecores = eCores;
+  g_expected_pcores = pCores;
+  g_expected_scores = sCores;
+}
+
+// Cached IOHIDEventSystemClient — creating one is expensive (~2-5ms IPC to hidd).
+// Reuse across ticks instead of create+destroy each time.
+static IOHIDEventSystemClientRef g_hidClient = NULL;
+static CFDictionaryRef g_hidMatching = NULL;
+
+static IOHIDEventSystemClientRef getHIDClient(void) {
+  if (g_hidClient == NULL) {
+    g_hidClient = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
+    if (g_hidClient != NULL && g_hidMatching == NULL) {
+      const void *keys[2] = {CFSTR("PrimaryUsagePage"), CFSTR("PrimaryUsage")};
+      int page = kHIDPage_AppleVendor;
+      int usage = kHIDUsage_AppleVendor_TemperatureSensor;
+      CFNumberRef pageNum = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &page);
+      CFNumberRef usageNum = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &usage);
+      const void *values[2] = {pageNum, usageNum};
+      g_hidMatching = CFDictionaryCreate(
+          kCFAllocatorDefault, keys, values, 2,
+          &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+      CFRelease(pageNum);
+      CFRelease(usageNum);
+    }
+    if (g_hidClient != NULL && g_hidMatching != NULL) {
+      IOHIDEventSystemClientSetMatching(g_hidClient, g_hidMatching);
+    }
+  }
+  return g_hidClient;
+}
 
 static int cfStringStartsWith(CFStringRef str, const char *prefix);
 static void loadSMCTempKeys();
@@ -331,7 +371,7 @@ static void loadGpuFrequencies() {
 
         for (CFIndex i = 0; i < count; i++) {
           CFStringRef key = (CFStringRef)keys[i];
-          char keyName[128];
+          char keyName[512];
           CFStringGetCString(key, keyName, sizeof(keyName),
                              kCFStringEncodingUTF8);
 
@@ -740,40 +780,43 @@ int initIOReport() {
       IOReportCopyChannelsInGroup(energyGroup, NULL, 0, 0, 0);
   CFDictionaryRef gpuChan =
       IOReportCopyChannelsInGroup(gpuGroup, NULL, 0, 0, 0);
+  int hasGpu = (gpuChan != NULL);
+  int hasCpu = 0, hasAmc = 0;
 
   if (energyChan == NULL) {
+    fprintf(stderr, "initIOReport: 'Energy Model' channel group not found\n");
     return -1;
   }
 
   if (gpuChan != NULL) {
     IOReportMergeChannels(energyChan, gpuChan, NULL);
     CFRelease(gpuChan);
+  } else {
+    fprintf(stderr, "initIOReport: warning: 'GPU Stats' channel group not found\n");
   }
 
   CFDictionaryRef cpuChan =
       IOReportCopyChannelsInGroup(cpuGroup, NULL, 0, 0, 0);
+  hasCpu = (cpuChan != NULL);
   if (cpuChan != NULL) {
     IOReportMergeChannels(energyChan, cpuChan, NULL);
     CFRelease(cpuChan);
+  } else {
+    fprintf(stderr, "initIOReport: warning: 'CPU Stats' channel group not found\n");
   }
 
   CFDictionaryRef amcChan =
       IOReportCopyChannelsInGroup(amcGroup, NULL, 0, 0, 0);
+  hasAmc = (amcChan != NULL);
   if (amcChan != NULL) {
     IOReportMergeChannels(energyChan, amcChan, NULL);
     CFRelease(amcChan);
   }
 
-  // PMP group provides DRAM bandwidth data on A-series chips (A18 Pro, etc.)
-  // where AMC Stats channels are present but produce no delta data.
-  CFDictionaryRef pmpChan =
-      IOReportCopyChannelsInGroup(CFSTR("PMP"), NULL, 0, 0, 0);
-  if (pmpChan != NULL) {
-    IOReportMergeChannels(energyChan, pmpChan, NULL);
-    CFRelease(pmpChan);
-  }
-
-
+  // DON'T subscribe to PMP yet — probe AMC Stats first.
+  // PMP adds hundreds of channels that increase kernel IPC cost
+  // on every IOReportCreateSamples call. Only needed on A-series
+  // where AMC Stats doesn't produce data.
 
   CFIndex size = CFDictionaryGetCount(energyChan);
   g_channels =
@@ -781,6 +824,7 @@ int initIOReport() {
   CFRelease(energyChan);
 
   if (g_channels == NULL) {
+    fprintf(stderr, "initIOReport: failed to create mutable channel dictionary (size=%ld)\n", (long)size);
     return -2;
   }
 
@@ -789,6 +833,16 @@ int initIOReport() {
       IOReportCreateSubscription(NULL, g_channels, &subsystem, 0, NULL);
 
   if (g_subscription == NULL) {
+    // Count channels for diagnostic info
+    CFArrayRef chArr = CFDictionaryGetValue(g_channels, CFSTR("IOReportChannels"));
+    CFIndex chCount = chArr ? CFArrayGetCount(chArr) : 0;
+    fprintf(stderr, "initIOReport: IOReportCreateSubscription failed "
+            "(channels=%ld, groups: Energy=%s GPU=%s CPU=%s AMC=%s)\n",
+            (long)chCount,
+            "yes",
+            hasGpu ? "yes" : "no",
+            hasCpu ? "yes" : "no",
+            hasAmc ? "yes" : "no");
     CFRelease(g_channels);
     g_channels = NULL;
     return -3;
@@ -800,23 +854,13 @@ int initIOReport() {
   g_smcConn = SMCOpen();
   loadSMCTempKeys();
 
-  // Initialize kperf-based DRAM BW monitoring as fallback.
-  // This configures PMU counters for L1D cache miss events.
-  // Requires root; fails silently without root.
-  initKperfDramBW();
-
-  // Auto-calibrate DRAM power → bandwidth conversion.
-  // Runs a brief ~2 second memory benchmark to derive the chip-specific
-  // GB/s-per-watt constant. Only needed on M5+ where AMC Stats is blocked.
-  // On M1-M4, AMC Stats provides direct byte counters so this is unused.
-  //
-  // Probe AMC Stats / PMP with a quick 100ms sample first to avoid the
-  // ~2 second calibration delay on chips that don't need it.
+  // Probe AMC Stats with a quick 50ms sample to check if it produces data.
+  // This determines whether we need PMP channels and DRAM BW calibration.
+  int hasDirectBW = 0;
   {
     CFDictionaryRef probe1 = IOReportCreateSamples(g_subscription, g_channels, NULL);
-    usleep(100000); // 100ms probe
+    usleep(50000); // 50ms probe (sufficient to detect non-zero AMC data)
     CFDictionaryRef probe2 = IOReportCreateSamples(g_subscription, g_channels, NULL);
-    int hasDirectBW = 0;
     if (probe1 && probe2) {
       CFDictionaryRef probeDelta = IOReportCreateSamplesDelta(probe1, probe2, NULL);
       if (probeDelta) {
@@ -826,7 +870,9 @@ int initIOReport() {
           CFDictionaryRef ch = (CFDictionaryRef)CFArrayGetValueAtIndex(arr, i);
           CFStringRef grp = IOReportChannelGetGroup(ch);
           if (!grp) continue;
-          if (cfStringMatch(grp, "AMC Stats") || cfStringMatch(grp, "PMP")) {
+          char grpStr[64] = {0};
+          CFStringGetCString(grp, grpStr, sizeof(grpStr), kCFStringEncodingUTF8);
+          if (strcmp(grpStr, "AMC Stats") == 0) {
             char name[256] = {0};
             CFStringRef nameRef = IOReportChannelGetChannelName(ch);
             if (nameRef)
@@ -842,10 +888,34 @@ int initIOReport() {
     }
     if (probe1) CFRelease(probe1);
     if (probe2) CFRelease(probe2);
+  }
 
-    if (!hasDirectBW) {
-      calibrateDramBwFromPower();
+  // Only add PMP channels if AMC Stats doesn't produce data (A-series chips).
+  // On M-series, this saves hundreds of kernel-iterated channels per tick.
+  if (!hasDirectBW) {
+    CFDictionaryRef pmpChan =
+        IOReportCopyChannelsInGroup(CFSTR("PMP"), NULL, 0, 0, 0);
+    if (pmpChan != NULL) {
+      IOReportMergeChannels((CFDictionaryRef)g_channels, pmpChan, NULL);
+      CFRelease(pmpChan);
+
+      // Re-create subscription with PMP channels included.
+      // Guard: don't lose the working subscription if this fails.
+      IOReportSubscriptionRef newSub =
+          IOReportCreateSubscription(NULL, g_channels, &subsystem, 0, NULL);
+      if (newSub != NULL) {
+        g_subscription = newSub;
+      }
     }
+
+    // Initialize kperf-based DRAM BW monitoring as additional fallback.
+    // Only needed when AMC Stats doesn't work (M5+ / A-series).
+    // Requires root; fails silently without root.
+    initKperfDramBW();
+
+    // Auto-calibrate DRAM power → bandwidth conversion.
+    // Only needed on M5+ where AMC Stats is blocked.
+    calibrateDramBwFromPower();
   }
 
   return 0;
@@ -938,7 +1008,7 @@ void debugIOReport() {
 
       char group[64] = {0};
       char subGroup[64] = {0};
-      char channel[128] = {0};
+      char channel[512] = {0};
       char unit[32] = {0};
 
       if (groupRef)
@@ -961,6 +1031,179 @@ void debugIOReport() {
   CFRelease(allChannels);
 }
 
+// Standalone diagnostic dump — works even if initIOReport() fails.
+// Designed for users to paste output into GitHub issues.
+void dumpIOReportDebug(void) {
+  printf("=== mactop IOReport Debug Dump ===\n\n");
+
+  // 1. Probe all known IOReport channel groups
+  printf("--- IOReport Channel Groups ---\n");
+  const char *groups[] = {
+    "Energy Model", "GPU Stats", "CPU Stats", "AMC Stats",
+    "PMP", "CLPC", "ODS", "Performance Statistics",
+    NULL
+  };
+  for (int i = 0; groups[i] != NULL; i++) {
+    CFStringRef groupStr = CFStringCreateWithCString(
+        kCFAllocatorDefault, groups[i], kCFStringEncodingUTF8);
+    CFDictionaryRef ch = IOReportCopyChannelsInGroup(groupStr, NULL, 0, 0, 0);
+    if (ch != NULL) {
+      CFArrayRef arr = CFDictionaryGetValue(ch, CFSTR("IOReportChannels"));
+      CFIndex count = arr ? CFArrayGetCount(arr) : 0;
+      printf("  %-25s [OK]  %ld channels\n", groups[i], (long)count);
+      CFRelease(ch);
+    } else {
+      printf("  %-25s [NOT FOUND]\n", groups[i]);
+    }
+    CFRelease(groupStr);
+  }
+
+  // 2. Test subscription with Energy Model only (minimal)
+  printf("\n--- Subscription Test ---\n");
+  CFDictionaryRef energyChan =
+      IOReportCopyChannelsInGroup(CFSTR("Energy Model"), NULL, 0, 0, 0);
+  if (energyChan != NULL) {
+    CFMutableDictionaryRef mutable =
+        CFDictionaryCreateMutableCopy(kCFAllocatorDefault,
+                                     CFDictionaryGetCount(energyChan), energyChan);
+    CFRelease(energyChan);
+    CFMutableDictionaryRef subsystem = NULL;
+    IOReportSubscriptionRef sub =
+        IOReportCreateSubscription(NULL, mutable, &subsystem, 0, NULL);
+    if (sub != NULL) {
+      printf("  Energy-only subscription: [OK]\n");
+      // Test a quick sample
+      CFDictionaryRef s = IOReportCreateSamples(sub, mutable, NULL);
+      printf("  Quick sample:             %s\n", s ? "[OK]" : "[FAIL]");
+      if (s) CFRelease(s);
+    } else {
+      printf("  Energy-only subscription: [FAIL] — this is the root cause\n");
+      printf("  Possible causes:\n");
+      printf("    - IOReport access denied (check: log show --predicate 'eventMessage CONTAINS \"IOReport\"' --last 1m)\n");
+      printf("    - Binary not signed (try: codesign -s - /path/to/mactop)\n");
+      printf("    - System restriction on this macOS version\n");
+    }
+    CFRelease(mutable);
+  } else {
+    printf("  Energy Model not available — cannot test subscription\n");
+  }
+
+  // 3. Test full subscription (as initIOReport does)
+  printf("\n--- Full Subscription Test ---\n");
+  energyChan = IOReportCopyChannelsInGroup(CFSTR("Energy Model"), NULL, 0, 0, 0);
+  if (energyChan != NULL) {
+    CFDictionaryRef gpuChan = IOReportCopyChannelsInGroup(CFSTR("GPU Stats"), NULL, 0, 0, 0);
+    CFDictionaryRef cpuChan = IOReportCopyChannelsInGroup(CFSTR("CPU Stats"), NULL, 0, 0, 0);
+    CFDictionaryRef amcChan = IOReportCopyChannelsInGroup(CFSTR("AMC Stats"), NULL, 0, 0, 0);
+    if (gpuChan) { IOReportMergeChannels(energyChan, gpuChan, NULL); CFRelease(gpuChan); }
+    if (cpuChan) { IOReportMergeChannels(energyChan, cpuChan, NULL); CFRelease(cpuChan); }
+    if (amcChan) { IOReportMergeChannels(energyChan, amcChan, NULL); CFRelease(amcChan); }
+    CFMutableDictionaryRef merged =
+        CFDictionaryCreateMutableCopy(kCFAllocatorDefault,
+                                     CFDictionaryGetCount(energyChan), energyChan);
+    CFRelease(energyChan);
+    CFArrayRef mergedArr = CFDictionaryGetValue(merged, CFSTR("IOReportChannels"));
+    CFIndex mergedCount = mergedArr ? CFArrayGetCount(mergedArr) : 0;
+    printf("  Merged channels: %ld\n", (long)mergedCount);
+    CFMutableDictionaryRef subsystem = NULL;
+    IOReportSubscriptionRef sub =
+        IOReportCreateSubscription(NULL, merged, &subsystem, 0, NULL);
+    printf("  Full subscription: %s\n", sub ? "[OK]" : "[FAIL]");
+    CFRelease(merged);
+  }
+
+  // 4. SMC connectivity
+  printf("\n--- SMC ---\n");
+  io_connect_t smc = SMCOpen();
+  printf("  SMC connection: %s (use --dump-temps for full key list)\n",
+         smc ? "[OK]" : "[FAIL]");
+  if (smc) SMCClose(smc);
+
+  // 5. HID sensor availability
+  printf("\n--- HID Temperature Sensors ---\n");
+  IOHIDEventSystemClientRef hidClient = getHIDClient();
+  if (hidClient) {
+    CFArrayRef services = IOHIDEventSystemClientCopyServices(hidClient);
+    if (services) {
+      CFIndex count = CFArrayGetCount(services);
+      int eCount = 0, pCount = 0, sCount = 0, gpuCount = 0, nandCount = 0, otherCount = 0;
+      for (CFIndex i = 0; i < count; i++) {
+        IOHIDServiceClientRef svc =
+            (IOHIDServiceClientRef)CFArrayGetValueAtIndex(services, i);
+        CFStringRef prodRef = IOHIDServiceClientCopyProperty(svc, CFSTR("Product"));
+        if (!prodRef) continue;
+        char prod[256] = {0};
+        CFStringGetCString(prodRef, prod, sizeof(prod), kCFStringEncodingUTF8);
+        if (strstr(prod, "eACC")) eCount++;
+        else if (strstr(prod, "pACC") || strstr(prod, "mACC")) pCount++;
+        else if (strstr(prod, "sACC")) sCount++;
+        else if (strstr(prod, "GPU")) gpuCount++;
+        else if (strstr(prod, "NAND")) nandCount++;
+        else otherCount++;
+        CFRelease(prodRef);
+      }
+      printf("  Total HID temp services: %ld\n", (long)count);
+      printf("  E-Core(eACC): %d  P-Core(pACC/mACC): %d  S-Core(sACC): %d\n",
+             eCount, pCount, sCount);
+      printf("  GPU: %d  NAND: %d  Other: %d\n", gpuCount, nandCount, otherCount);
+      CFRelease(services);
+    } else {
+      printf("  HID services: [NOT AVAILABLE]\n");
+    }
+  } else {
+    printf("  HID client: [FAIL]\n");
+  }
+
+  // 6. NVMe SMART capability
+  printf("\n--- NVMe SMART ---\n");
+  CFMutableDictionaryRef match = IOServiceMatching("IOBlockStorageDevice");
+  io_iterator_t iter;
+  kern_return_t kr = IOServiceGetMatchingServices(kIOMainPortDefault, match, &iter);
+  if (kr == kIOReturnSuccess) {
+    io_service_t svc;
+    int nvmeCount = 0;
+    while ((svc = IOIteratorNext(iter)) != 0) {
+      CFTypeRef smart = IORegistryEntryCreateCFProperty(
+          svc, CFSTR("NVMe SMART Capable"), kCFAllocatorDefault, 0);
+      if (smart) {
+        nvmeCount++;
+        // Get class name
+        io_name_t className;
+        IOObjectGetClass(svc, className);
+        // Get model
+        char model[64] = "unknown";
+        CFDictionaryRef devChars = IORegistryEntryCreateCFProperty(
+            svc, CFSTR("Device Characteristics"), kCFAllocatorDefault, 0);
+        if (devChars && CFGetTypeID(devChars) == CFDictionaryGetTypeID()) {
+          CFStringRef prodName = CFDictionaryGetValue(devChars, CFSTR("Product Name"));
+          if (prodName) CFStringGetCString(prodName, model, sizeof(model), kCFStringEncodingUTF8);
+        }
+        if (devChars) CFRelease(devChars);
+
+        // Test plugin
+        CFUUIDRef factoryID = CFUUIDGetConstantUUIDWithBytes(NULL,
+            0xAA,0x0F,0xA6,0xF9,0xC2,0xD6,0x45,0x7F,
+            0xB1,0x0B,0x59,0xA1,0x32,0x53,0x29,0x2F);
+        IOCFPlugInInterface **plugin = NULL;
+        SInt32 score = 0;
+        kern_return_t pkr = IOCreatePlugInInterfaceForService(
+            svc, factoryID, kIOCFPlugInInterfaceID, &plugin, &score);
+        printf("  [%d] %s (%s) — SMART plugin: %s\n",
+               nvmeCount, model, className,
+               pkr == kIOReturnSuccess ? "OK" : "FAIL (using HID fallback)");
+        if (plugin) (*plugin)->Release(plugin);
+        CFRelease(smart);
+      }
+      IOObjectRelease(svc);
+    }
+    IOObjectRelease(iter);
+    if (nvmeCount == 0) printf("  No SMART-capable NVMe devices found\n");
+  } else {
+    printf("  IOBlockStorageDevice matching failed\n");
+  }
+
+  printf("\n=== End Debug Dump ===\n");
+}
 typedef struct {
   double cpuPower;
   double gpuPower;
@@ -986,7 +1229,7 @@ typedef struct {
   fan_info_t fans[8];
   // Comprehensive temperature sensors
   int tempSensorCount;
-  temp_sensor_t temps[128];
+  temp_sensor_t temps[512];
 } PowerMetrics;
 
 static int cfStringMatch(CFStringRef str, const char *match) {
@@ -1059,6 +1302,10 @@ static char g_gpu_keys[64][5];
 static int g_gpu_key_count = 0;
 
 static const char *tempSensorName(const char *key) {
+  // NVMe SMART sensors use 'Nv' prefix (non-SMC, synthetic keys)
+  if (key[0] == 'N' && key[1] == 'v')
+    return "NVMe";
+
   if (key[0] != 'T')
     return "Unknown";
 
@@ -1095,7 +1342,7 @@ static const char *tempSensorName(const char *key) {
   case 'M':
     return "Memory"; // TM* = Memory VRM
   case 's':
-    return "SSD"; // Ts* = SSD proximity
+    return (g_expected_scores > 0) ? "CPU S-Core" : "SSD"; // Ts* = S-Core on M5+, SSD on M1-M4
   case 'S':
     return "SSD"; // TS* = SSD controller
   case 'H':
@@ -1157,8 +1404,8 @@ static void loadSMCTempKeys() {
     if (keyInfo.dataType != 1718383648)
       continue;
 
-    // CPU Keys: Tp* or Te*
-    if ((key[0] == 'T' && (key[1] == 'p' || key[1] == 'e'))) {
+    // CPU Keys: Tp*, Te*, and Ts* (only if chip has S-cores)
+    if ((key[0] == 'T' && (key[1] == 'p' || key[1] == 'e' || (key[1] == 's' && g_expected_scores > 0)))) {
       if (g_cpu_key_count < 64) {
         strcpy(g_cpu_keys[g_cpu_key_count++], key);
       }
@@ -1180,7 +1427,7 @@ static void loadAllTempSensors() {
     return;
 
   int totalKeys = SMCGetKeyCount(g_smcConn);
-  for (int i = 0; i < totalKeys && g_all_temp_sensor_count < 128; i++) {
+  for (int i = 0; i < totalKeys && g_all_temp_sensor_count < 512; i++) {
     char key[5];
     if (SMCGetKeyFromIndex(g_smcConn, i, key) != kIOReturnSuccess)
       continue;
@@ -1197,12 +1444,13 @@ static void loadAllTempSensors() {
     if (keyInfo.dataType != 1718383648)
       continue;
 
-    // Skip sensors with extreme values (> 200°C likely invalid)
-    // Note: don't exclude val <= 0 here — sensors may read 0°C when idle
-    // (e.g., inactive SSD, cold component) and warm up later.
+    // Include ALL temperature keys during enumeration — don't filter by value.
+    // This list is cached (loadAllTempSensors returns early once populated),
+    // and sensors that initially read 0°C (idle component) may warm up later.
+    // Filtering happens at refresh time in samplePowerMetrics instead.
     float val = (float)SMCGetFloatValue(g_smcConn, key);
     if (val > 200)
-      continue;
+      continue; // Skip clearly broken sensors (>200°C) at enumeration
 
     temp_sensor_t *sensor = &g_all_temp_sensors[g_all_temp_sensor_count];
     strcpy(sensor->key, key);
@@ -1210,6 +1458,82 @@ static void loadAllTempSensors() {
              key[2], key[3]);
     sensor->value = val;
     g_all_temp_sensor_count++;
+  }
+}
+
+// Diagnostic dump: print ALL SMC temperature keys, including filtered ones
+void dumpAllSMCTemps(void) {
+  if (!g_smcConn) {
+    printf("SMC connection not available\n");
+    return;
+  }
+
+  printf("=== Raw SMC Temperature Keys ===\n");
+  printf("%-6s  %-20s  %8s  %s\n", "Key", "Category", "Value", "Status");
+  printf("------  --------------------  --------  ------\n");
+
+  int totalKeys = SMCGetKeyCount(g_smcConn);
+  int tempKeyCount = 0;
+  int filteredCount = 0;
+
+  for (int i = 0; i < totalKeys; i++) {
+    char key[5];
+    if (SMCGetKeyFromIndex(g_smcConn, i, key) != kIOReturnSuccess)
+      continue;
+
+    if (key[0] != 'T')
+      continue;
+
+    SMCKeyData_keyInfo_t keyInfo;
+    if (SMCGetKeyInfo(g_smcConn, key, &keyInfo) != kIOReturnSuccess)
+      continue;
+
+    // Only float type (flt )
+    if (keyInfo.dataType != 1718383648)
+      continue;
+
+    float val = (float)SMCGetFloatValue(g_smcConn, key);
+    const char *name = tempSensorName(key);
+    const char *status = "✅ OK";
+
+    // Match the category-aware thresholds used in samplePowerMetrics
+    char k1 = key[1];
+    int isSilicon = (k1 == 'p' || k1 == 'e' || k1 == 'f' ||
+                     k1 == 'c' || k1 == 'C' || k1 == 'g' || k1 == 'R');
+    float minTemp = isSilicon ? 10.0f : 0.0f;
+
+    if (val <= minTemp) {
+      if (isSilicon && val > 0) {
+        status = "⚠ FILTERED (<10°C silicon)";
+      } else {
+        status = "⚠ FILTERED (≤0°C)";
+      }
+      filteredCount++;
+    } else if (val > 200) {
+      status = "⚠ FILTERED (>200°C)";
+      filteredCount++;
+    }
+
+    printf("%-6s  %-20s  %7.1f°C  %s\n", key, name, val, status);
+    tempKeyCount++;
+  }
+
+  printf("\nTotal SMC temperature keys: %d (filtered: %d, active: %d)\n",
+         tempKeyCount, filteredCount, tempKeyCount - filteredCount);
+  printf("Note: When HID sensors are available, SMC core keys (Tp/Te/Tf/Tg/TR) are\n");
+  printf("      replaced by per-physical-core HID sensors for accuracy.\n");
+
+  // Also print core configuration
+  printf("\n=== Core Configuration ===\n");
+  printf("CPU temp keys (Tp*/Te*): %d\n", g_cpu_key_count);
+  printf("GPU temp keys (Tg*):     %d\n", g_gpu_key_count);
+  for (int i = 0; i < g_cpu_key_count; i++) {
+    float val = (float)SMCGetFloatValue(g_smcConn, g_cpu_keys[i]);
+    printf("  CPU[%d] = %s  %.1f°C\n", i, g_cpu_keys[i], val);
+  }
+  for (int i = 0; i < g_gpu_key_count; i++) {
+    float val = (float)SMCGetFloatValue(g_smcConn, g_gpu_keys[i]);
+    printf("  GPU[%d] = %s  %.1f°C\n", i, g_gpu_keys[i], val);
   }
 }
 
@@ -1317,6 +1641,157 @@ int resetFansToAuto() {
   return 0;
 }
 
+// Cached NVMe SMART temps — refreshed periodically, seeded by HID NAND fallback
+static temp_sensor_t g_nvme_temps[16];
+static int g_nvme_temp_count = 0;
+
+// Read per-core temperature sensors from IOHIDEventSystemClient.
+// Returns the number of sensors written into the output array.
+// Also reports per-category counts through output parameters.
+static int readHIDCoreTempSensors(temp_sensor_t *out, int maxSensors,
+                                  int *outEcount, int *outPcount,
+                                  int *outScount, int *outGPUcount) {
+  int count = 0;
+  *outEcount = 0;
+  *outPcount = 0;
+  *outScount = 0;
+  *outGPUcount = 0;
+
+  IOHIDEventSystemClientRef client = getHIDClient();
+  if (client == NULL) {
+    return 0;
+  }
+
+  CFArrayRef services = IOHIDEventSystemClientCopyServices(client);
+  if (services == NULL) {
+    return 0;
+  }
+
+  // Track per-type sequential indices
+  int eIdx = 0, pIdx = 0, sIdx = 0, gpuIdx = 0;
+
+  CFIndex svcCount = CFArrayGetCount(services);
+  for (CFIndex i = 0; i < svcCount && count < maxSensors; i++) {
+    IOHIDServiceClientRef service =
+        (IOHIDServiceClientRef)CFArrayGetValueAtIndex(services, i);
+    if (service == NULL)
+      continue;
+
+    CFStringRef productRef =
+        IOHIDServiceClientCopyProperty(service, CFSTR("Product"));
+    if (productRef == NULL)
+      continue;
+
+    char product[512] = {0};
+    CFStringGetCString(productRef, product, sizeof(product),
+                       kCFStringEncodingUTF8);
+
+    IOHIDEventRef event = IOHIDServiceClientCopyEvent(
+        service, kIOHIDEventTypeTemperature, 0, 0);
+    if (event == NULL) {
+      CFRelease(productRef);
+      continue;
+    }
+
+    double temp =
+        IOHIDEventGetFloatValue(event, kIOHIDEventTypeTemperature << 16);
+    CFRelease(event);
+    CFRelease(productRef);
+
+    if (temp <= 10 || temp > 150)
+      continue;  // Apply same silicon minimum
+
+    // Classify by product name
+    const char *category = NULL;
+    int *idxPtr = NULL;
+
+    if (strstr(product, "eACC") != NULL) {
+      category = "CPU E-Core";
+      idxPtr = &eIdx;
+    } else if (strstr(product, "sACC") != NULL) {
+      // M5 Pro/Max/Ultra Super cores — check before pACC since
+      // sACC won't match pACC, but order matters for clarity
+      category = "CPU S-Core";
+      idxPtr = &sIdx;
+    } else if (strstr(product, "pACC") != NULL ||
+               strstr(product, "mACC") != NULL) {
+      // M-cores (Medium, M5) are treated as P-cores for display,
+      // consistent with native_stats.go core classification
+      category = "CPU P-Core";
+      idxPtr = &pIdx;
+    } else if (strstr(product, "GPU") != NULL) {
+      category = "GPU";
+      idxPtr = &gpuIdx;
+    }
+
+    if (category != NULL && idxPtr != NULL) {
+      temp_sensor_t *s = &out[count];
+      // Derive key prefix char from category
+      char keyChar = 'g'; // default for GPU
+      if (strcmp(category, "CPU E-Core") == 0) keyChar = 'e';
+      else if (strcmp(category, "CPU P-Core") == 0) keyChar = 'p';
+      else if (strcmp(category, "CPU S-Core") == 0) keyChar = 's';
+      // Use synthetic key: He00, Hp00, Hs00, Hg00 (H prefix = HID source)
+      snprintf(s->key, sizeof(s->key), "H%c%02X", keyChar, *idxPtr);
+      snprintf(s->name, sizeof(s->name), "%s %02d", category, *idxPtr);
+      s->value = (float)temp;
+      (*idxPtr)++;
+      count++;
+    }
+  }
+
+  // Report per-category counts
+  *outEcount = eIdx;
+  *outPcount = pIdx;
+  *outScount = sIdx;
+  *outGPUcount = gpuIdx;
+
+  // Seed NVMe temperatures from HID NAND sensors (AppleEmbeddedNVMeTemperatureSensor)
+  // if the SMART plugin cache is empty (plugin fails for Apple embedded NVMe).
+  // This provides reliable internal NVMe drive temperature via IOHIDEventSystemClient.
+  if (g_nvme_temp_count == 0 && services != NULL) {
+    int nvmeIdx = 0;
+    for (CFIndex i = 0; i < svcCount && nvmeIdx < 16; i++) {
+      IOHIDServiceClientRef service =
+          (IOHIDServiceClientRef)CFArrayGetValueAtIndex(services, i);
+      if (service == NULL) continue;
+
+      CFStringRef productRef =
+          IOHIDServiceClientCopyProperty(service, CFSTR("Product"));
+      if (productRef == NULL) continue;
+
+      char product[512] = {0};
+      CFStringGetCString(productRef, product, sizeof(product),
+                         kCFStringEncodingUTF8);
+
+      // Match "NAND CH0 temp", "NAND CH1 temp", etc.
+      if (strstr(product, "NAND") != NULL && strstr(product, "temp") != NULL) {
+        IOHIDEventRef event = IOHIDServiceClientCopyEvent(
+            service, kIOHIDEventTypeTemperature, 0, 0);
+        if (event != NULL) {
+          double temp = IOHIDEventGetFloatValue(event,
+              kIOHIDEventTypeTemperature << 16);
+          CFRelease(event);
+          if (temp > 0.0 && temp < 150.0) {
+            temp_sensor_t *s = &g_nvme_temps[nvmeIdx];
+            snprintf(s->key, sizeof(s->key), "Nv%02X", nvmeIdx);
+            snprintf(s->name, sizeof(s->name), "NVMe %s", product);
+            s->value = (float)temp;
+            nvmeIdx++;
+          }
+        }
+      }
+      CFRelease(productRef);
+    }
+    if (nvmeIdx > 0) {
+      g_nvme_temp_count = nvmeIdx;
+    }
+  }
+
+  CFRelease(services);
+  return count;
+}
+
 static float readSocTemperature(float *outCpuTemp, float *outGpuTemp) {
   float cpuSum = 0;
   int cpuCount = 0;
@@ -1341,30 +1816,10 @@ static float readSocTemperature(float *outCpuTemp, float *outGpuTemp) {
     }
   }
 
-  // Fallback to HID if SMC failed
+  // Fallback to HID if SMC failed — reuse cached client
   if (cpuCount == 0 || gpuCount == 0) {
-    // ... (HID logic) ...
-    const void *keys[2] = {CFSTR("PrimaryUsagePage"), CFSTR("PrimaryUsage")};
-    int page = kHIDPage_AppleVendor;
-    int usage = kHIDUsage_AppleVendor_TemperatureSensor;
-    CFNumberRef pageNum =
-        CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &page);
-    CFNumberRef usageNum =
-        CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &usage);
-    const void *values[2] = {pageNum, usageNum};
-
-    CFDictionaryRef matching = CFDictionaryCreate(
-        kCFAllocatorDefault, keys, values, 2, &kCFTypeDictionaryKeyCallBacks,
-        &kCFTypeDictionaryValueCallBacks);
-    CFRelease(pageNum);
-    CFRelease(usageNum);
-
-    IOHIDEventSystemClientRef client =
-        IOHIDEventSystemClientCreate(kCFAllocatorDefault);
+    IOHIDEventSystemClientRef client = getHIDClient();
     if (client != NULL) {
-      IOHIDEventSystemClientSetMatching(client, matching);
-      CFRelease(matching);
-
       CFArrayRef services = IOHIDEventSystemClientCopyServices(client);
       if (services != NULL) {
         CFIndex count = CFArrayGetCount(services);
@@ -1379,7 +1834,7 @@ static float readSocTemperature(float *outCpuTemp, float *outGpuTemp) {
           if (productRef == NULL)
             continue;
 
-          char product[128] = {0};
+          char product[512] = {0};
           CFStringGetCString(productRef, product, sizeof(product),
                              kCFStringEncodingUTF8);
 
@@ -1413,9 +1868,6 @@ static float readSocTemperature(float *outCpuTemp, float *outGpuTemp) {
         }
         CFRelease(services);
       }
-      CFRelease(client);
-    } else {
-      CFRelease(matching);
     }
   }
 
@@ -1428,6 +1880,160 @@ static float readSocTemperature(float *outCpuTemp, float *outGpuTemp) {
   return (*outCpuTemp > *outGpuTemp) ? *outCpuTemp : *outGpuTemp;
 }
 
+// === NVMe SMART Temperature Reading ===
+// Uses Apple's private NVMeSMARTLib.plugin to read SMART health log
+// from NVMe drives (internal + external Thunderbolt SSDs).
+// Temperature is at bytes 1-2 of the standard NVMe SMART log (Kelvin, LE16).
+
+// NVMe SMART data structure (NVM Express Spec 5.10.1.2)
+typedef struct {
+  uint8_t  critical_warning;
+  uint8_t  temperature[2];     // Composite temp in Kelvin (little-endian)
+  uint8_t  available_spare;
+  uint8_t  available_spare_threshold;
+  uint8_t  percentage_used;
+  uint8_t  reserved1[26];
+  uint8_t  data_units_read[16];
+  uint8_t  data_units_written[16];
+  uint8_t  host_read_commands[16];
+  uint8_t  host_write_commands[16];
+  uint8_t  controller_busy_time[16];
+  uint8_t  power_cycles[16];
+  uint8_t  power_on_hours[16];
+  uint8_t  unsafe_shutdowns[16];
+  uint8_t  media_errors[16];
+  uint8_t  num_err_log_entries[16];
+  uint8_t  reserved2[320];
+} NVMeSMARTData;
+
+// IONVMeSMARTInterface vtable (matches NVMeSMARTLib.plugin / smartmontools)
+typedef struct IONVMeSMARTInterface {
+  IUNKNOWN_C_GUTS;
+  UInt16 version;
+  UInt16 revision;
+  IOReturn (*SMARTReadData)(void *interface, NVMeSMARTData *data);
+  IOReturn (*GetIdentifyData)(void *interface, void *data, unsigned int ns);
+  UInt64 reserved0;
+  UInt64 reserved1;
+  IOReturn (*GetLogPage)(void *interface, void *data, unsigned int logPageId, unsigned int numDWords);
+} IONVMeSMARTInterface;
+
+
+static void readNVMeSMARTTemps(void) {
+  // Use local storage — only update global cache if we get results.
+  // This preserves cached data when the SMART plugin intermittently fails
+  // (common on Apple Silicon embedded NVMe where the user client is unstable).
+  temp_sensor_t localTemps[16];
+  int localCount = 0;
+
+  // kIONVMeSMARTUserClientTypeID
+  CFUUIDRef smartFactory = CFUUIDGetConstantUUIDWithBytes(NULL,
+      0xAA, 0x0F, 0xA6, 0xF9, 0xC2, 0xD6, 0x45, 0x7F,
+      0xB1, 0x0B, 0x59, 0xA1, 0x32, 0x53, 0x29, 0x2F);
+  // kIONVMeSMARTInterfaceID
+  CFUUIDRef smartInterfaceID = CFUUIDGetConstantUUIDWithBytes(NULL,
+      0xCC, 0xD1, 0xDB, 0x19, 0xFD, 0x9A, 0x4D, 0xAF,
+      0xBF, 0x95, 0x12, 0x45, 0x4B, 0x23, 0x0A, 0xB6);
+
+  // Match all block storage devices, then filter for NVMe SMART support
+  CFMutableDictionaryRef match = IOServiceMatching("IOBlockStorageDevice");
+  io_iterator_t iter;
+  kern_return_t kr = IOServiceGetMatchingServices(kIOMainPortDefault, match, &iter);
+  if (kr != kIOReturnSuccess) return;
+
+  io_service_t svc;
+  while ((svc = IOIteratorNext(iter)) != 0 && localCount < 16) {
+    // Check for "NVMe SMART Capable" property
+    CFTypeRef smartCapable = IORegistryEntryCreateCFProperty(
+        svc, CFSTR("NVMe SMART Capable"), kCFAllocatorDefault, 0);
+    if (!smartCapable) {
+      IOObjectRelease(svc);
+      continue;
+    }
+    int isSmart = 0;
+    if (CFGetTypeID(smartCapable) == CFBooleanGetTypeID()) {
+      isSmart = CFBooleanGetValue((CFBooleanRef)smartCapable) ? 1 : 0;
+    } else if (CFGetTypeID(smartCapable) == CFStringGetTypeID()) {
+      char buf[8];
+      CFStringGetCString((CFStringRef)smartCapable, buf, sizeof(buf), kCFStringEncodingUTF8);
+      isSmart = (strcasecmp(buf, "Yes") == 0) ? 1 : 0;
+    }
+    CFRelease(smartCapable);
+    if (!isSmart) {
+      IOObjectRelease(svc);
+      continue;
+    }
+
+    // Get model name from "Device Characteristics" dictionary
+    char model[64] = "NVMe";
+    CFDictionaryRef devChars = IORegistryEntryCreateCFProperty(
+        svc, CFSTR("Device Characteristics"), kCFAllocatorDefault, 0);
+    if (devChars && CFGetTypeID(devChars) == CFDictionaryGetTypeID()) {
+      CFStringRef prodName = CFDictionaryGetValue(devChars, CFSTR("Product Name"));
+      if (prodName && CFGetTypeID(prodName) == CFStringGetTypeID()) {
+        CFStringGetCString(prodName, model, sizeof(model), kCFStringEncodingUTF8);
+        size_t len = strlen(model);
+        while (len > 0 && model[len - 1] == ' ') model[--len] = '\0';
+      }
+    }
+    if (devChars) CFRelease(devChars);
+
+    // Create plugin interface for SMART reading
+    IOCFPlugInInterface **plugin = NULL;
+    SInt32 score = 0;
+    kr = IOCreatePlugInInterfaceForService(svc, smartFactory,
+                                           kIOCFPlugInInterfaceID,
+                                           &plugin, &score);
+    if (kr != kIOReturnSuccess || !plugin) {
+      IOObjectRelease(svc);
+      continue;
+    }
+
+    // Query for the NVMe SMART interface
+    IONVMeSMARTInterface **smartInterface = NULL;
+    HRESULT res = (*plugin)->QueryInterface(plugin,
+        CFUUIDGetUUIDBytes(smartInterfaceID), (LPVOID *)&smartInterface);
+    (*plugin)->Release(plugin);
+
+    if (res != S_OK || !smartInterface) {
+      IOObjectRelease(svc);
+      continue;
+    }
+
+    // Read SMART data
+    NVMeSMARTData smartData;
+    memset(&smartData, 0, sizeof(smartData));
+    IOReturn readResult = (*smartInterface)->SMARTReadData(smartInterface, &smartData);
+
+    if (readResult == kIOReturnSuccess) {
+      // Temperature: bytes 1-2, little-endian uint16 in Kelvin
+      uint16_t tempK = (uint16_t)smartData.temperature[0] |
+                       ((uint16_t)smartData.temperature[1] << 8);
+      if (tempK > 0 && tempK < 1000) {
+        float tempC = (float)tempK - 273.15f;
+        if (tempC > 0.0f && tempC < 150.0f) {
+          temp_sensor_t *s = &localTemps[localCount];
+          snprintf(s->key, sizeof(s->key), "Nv%02X", localCount);
+          snprintf(s->name, sizeof(s->name), "NVMe %.50s", model);
+          s->value = tempC;
+          localCount++;
+        }
+      }
+    }
+
+    (*smartInterface)->Release(smartInterface);
+    IOObjectRelease(svc);
+  }
+  IOObjectRelease(iter);
+
+  // Only update global cache if we got results.
+  // If all reads failed, preserve previous cached data.
+  if (localCount > 0) {
+    memcpy(g_nvme_temps, localTemps, localCount * sizeof(temp_sensor_t));
+    g_nvme_temp_count = localCount;
+  }
+}
+
 PowerMetrics samplePowerMetrics(int durationMs) {
   PowerMetrics metrics = {0};
 
@@ -1436,6 +2042,8 @@ PowerMetrics samplePowerMetrics(int durationMs) {
       return metrics;
     }
   }
+
+  @autoreleasepool {
 
   CFDictionaryRef sample1 =
       IOReportCreateSamples(g_subscription, g_channels, NULL);
@@ -1496,29 +2104,37 @@ PowerMetrics samplePowerMetrics(int durationMs) {
     if (groupRef == NULL || channelRef == NULL)
       continue;
 
+    // Extract group and channel to C-strings ONCE per channel.
+    // This eliminates all temporary CFStringRef allocations from
+    // cfStringMatch/Contains/StartsWith in the hot loop.
+    char grp[64] = {0};
+    char chn[256] = {0};
+    CFStringGetCString(groupRef, grp, sizeof(grp), kCFStringEncodingUTF8);
+    CFStringGetCString(channelRef, chn, sizeof(chn), kCFStringEncodingUTF8);
 
-
-    if (cfStringMatch(groupRef, "Energy Model")) {
+    if (strcmp(grp, "Energy Model") == 0) {
       CFStringRef unitRef = IOReportChannelGetUnitLabel(item);
       int64_t val = IOReportSimpleGetIntegerValue(item, 0);
       double watts = energyToWatts(val, unitRef, (double)durationMs);
 
-      if (cfStringContains(channelRef, "CPU Energy")) {
+      if (strstr(chn, "CPU Energy") != NULL) {
         metrics.cpuPower += watts;
-      } else if (cfStringMatch(channelRef, "GPU Energy")) {
+      } else if (strcmp(chn, "GPU Energy") == 0) {
         metrics.gpuPower += watts;
-      } else if (cfStringStartsWith(channelRef, "ANE")) {
+      } else if (strncmp(chn, "ANE", 3) == 0) {
         metrics.anePower += watts;
-      } else if (cfStringStartsWith(channelRef, "DRAM")) {
+      } else if (strncmp(chn, "DRAM", 4) == 0) {
         metrics.dramPower += watts;
-      } else if (cfStringStartsWith(channelRef, "GPU SRAM")) {
+      } else if (strncmp(chn, "GPU SRAM", 8) == 0) {
         metrics.gpuSramPower += watts;
       }
-    } else if (cfStringMatch(groupRef, "GPU Stats")) {
+    } else if (strcmp(grp, "GPU Stats") == 0) {
       CFStringRef subgroupRef = IOReportChannelGetSubGroup(item);
-      if (subgroupRef != NULL &&
-          cfStringMatch(subgroupRef, "GPU Performance States")) {
-        if (cfStringMatch(channelRef, "GPUPH")) {
+      if (subgroupRef != NULL) {
+        char sub[64] = {0};
+        CFStringGetCString(subgroupRef, sub, sizeof(sub), kCFStringEncodingUTF8);
+        if (strcmp(sub, "GPU Performance States") == 0 &&
+            strcmp(chn, "GPUPH") == 0) {
           int32_t stateCount = IOReportStateGetCount(item);
           int64_t totalTime = 0;
           int64_t activeTime = 0;
@@ -1530,14 +2146,17 @@ PowerMetrics samplePowerMetrics(int durationMs) {
             CFStringRef stateName = IOReportStateGetNameForIndex(item, s);
             totalTime += residency;
 
-            if (stateName != NULL && !cfStringMatch(stateName, "OFF") &&
-                !cfStringMatch(stateName, "IDLE") &&
-                !cfStringMatch(stateName, "DOWN")) {
-              activeTime += residency;
-              if (g_gpu_freq_count > 0 && activeStateIdx < g_gpu_freq_count) {
-                weightedFreq += (double)g_gpu_freqs[activeStateIdx] * residency;
+            if (stateName != NULL) {
+              char sn[32] = {0};
+              CFStringGetCString(stateName, sn, sizeof(sn), kCFStringEncodingUTF8);
+              if (strcmp(sn, "OFF") != 0 && strcmp(sn, "IDLE") != 0 &&
+                  strcmp(sn, "DOWN") != 0) {
+                activeTime += residency;
+                if (g_gpu_freq_count > 0 && activeStateIdx < g_gpu_freq_count) {
+                  weightedFreq += (double)g_gpu_freqs[activeStateIdx] * residency;
+                }
+                activeStateIdx++;
               }
-              activeStateIdx++;
             }
           }
 
@@ -1549,22 +2168,25 @@ PowerMetrics samplePowerMetrics(int durationMs) {
           }
         }
       }
-    } else if (cfStringMatch(groupRef, "CPU Stats")) {
+    } else if (strcmp(grp, "CPU Stats") == 0) {
       CFStringRef subgroupRef = IOReportChannelGetSubGroup(item);
-      if (subgroupRef != NULL &&
-          cfStringMatch(subgroupRef, "CPU Complex Performance States")) {
+      if (subgroupRef != NULL) {
+        char sub[64] = {0};
+        CFStringGetCString(subgroupRef, sub, sizeof(sub), kCFStringEncodingUTF8);
+        if (strcmp(sub, "CPU Complex Performance States") != 0)
+          continue;
 
         // Check MCPU first — on M5+ chips, MCPU0/MCPU1 contain "CPU0"/"CPU1"
         // which would falsely match the E-cluster/P-cluster fallbacks.
-        int isMCluster = cfStringContains(channelRef, "MCPU");
-        int isSCluster = cfStringContains(channelRef, "SCPU");
+        int isMCluster = (strstr(chn, "MCPU") != NULL);
+        int isSCluster = (strstr(chn, "SCPU") != NULL);
 
         // E-Cluster: ECPU (M1-M4), or legacy CPU0 fallback (but NOT MCPU0)
-        int isECluster = cfStringContains(channelRef, "ECPU") ||
-                         (!isMCluster && cfStringMatch(channelRef, "CPU0"));
+        int isECluster = (strstr(chn, "ECPU") != NULL) ||
+                         (!isMCluster && strcmp(chn, "CPU0") == 0);
         // P-Cluster: PCPU (all chips), or legacy CPU1 fallback (but NOT MCPU1)
-        int isPCluster = cfStringContains(channelRef, "PCPU") ||
-                         (!isMCluster && cfStringMatch(channelRef, "CPU1"));
+        int isPCluster = (strstr(chn, "PCPU") != NULL) ||
+                         (!isMCluster && strcmp(chn, "CPU1") == 0);
 
         if (isECluster || isPCluster || isSCluster || isMCluster) {
           int32_t stateCount = IOReportStateGetCount(item);
@@ -1577,55 +2199,55 @@ PowerMetrics samplePowerMetrics(int durationMs) {
             CFStringRef stateName = IOReportStateGetNameForIndex(item, s);
             totalTime += residency;
 
-            if (stateName != NULL && !cfStringMatch(stateName, "OFF") &&
-                !cfStringMatch(stateName, "IDLE")) {
-
-              activeTime += residency;
-
+            if (stateName != NULL) {
               char nameBuf[64] = {0};
               CFStringGetCString(stateName, nameBuf, sizeof(nameBuf),
                                  kCFStringEncodingUTF8);
 
-              int freq = 0;
+              if (strcmp(nameBuf, "OFF") != 0 && strcmp(nameBuf, "IDLE") != 0) {
+                activeTime += residency;
 
-              // Heuristic for "V#..." format
-              if (nameBuf[0] == 'V') {
-                int vIdx = -1;
-                // Parse index after 'V'
-                if (sscanf(nameBuf, "V%d", &vIdx) == 1 && vIdx >= 0) {
-                  if (isECluster && vIdx < g_ecpu_freq_count) {
-                    freq = g_ecpu_freqs[vIdx];
-                  } else if (isMCluster && vIdx < g_scpu_freq_count) {
-                    // M5+ M-cluster: use dedicated table (voltage-states22-sram)
-                    freq = g_scpu_freqs[vIdx];
-                  } else if (isMCluster && vIdx < g_pcpu_freq_count) {
-                    // M-cluster fallback: use P table if M table not loaded
-                    freq = g_pcpu_freqs[vIdx];
-                  } else if (isPCluster && vIdx < g_pcpu_freq_count) {
-                    freq = g_pcpu_freqs[vIdx];
-                  } else if (isSCluster && vIdx < g_scpu_freq_count) {
-                    freq = g_scpu_freqs[vIdx];
+                int freq = 0;
+
+                // Heuristic for "V#..." format
+                if (nameBuf[0] == 'V') {
+                  int vIdx = -1;
+                  // Parse index after 'V'
+                  if (sscanf(nameBuf, "V%d", &vIdx) == 1 && vIdx >= 0) {
+                    if (isECluster && vIdx < g_ecpu_freq_count) {
+                      freq = g_ecpu_freqs[vIdx];
+                    } else if (isMCluster && vIdx < g_scpu_freq_count) {
+                      // M5+ M-cluster: use dedicated table (voltage-states22-sram)
+                      freq = g_scpu_freqs[vIdx];
+                    } else if (isMCluster && vIdx < g_pcpu_freq_count) {
+                      // M-cluster fallback: use P table if M table not loaded
+                      freq = g_pcpu_freqs[vIdx];
+                    } else if (isPCluster && vIdx < g_pcpu_freq_count) {
+                      freq = g_pcpu_freqs[vIdx];
+                    } else if (isSCluster && vIdx < g_scpu_freq_count) {
+                      freq = g_scpu_freqs[vIdx];
+                    }
                   }
                 }
-              }
 
-              // Fallback to searching for explicit number in string
-              if (freq == 0) {
-                char *numStart = NULL;
-                for (int c = 0; nameBuf[c]; c++) {
-                  if (nameBuf[c] >= '0' && nameBuf[c] <= '9') {
-                    numStart = &nameBuf[c];
-                    break;
+                // Fallback to searching for explicit number in string
+                if (freq == 0) {
+                  char *numStart = NULL;
+                  for (int c = 0; nameBuf[c]; c++) {
+                    if (nameBuf[c] >= '0' && nameBuf[c] <= '9') {
+                      numStart = &nameBuf[c];
+                      break;
+                    }
+                  }
+                  if (numStart) {
+                    freq = atoi(numStart);
                   }
                 }
-                if (numStart) {
-                  freq = atoi(numStart);
-                }
-              }
 
-              // Sanity check freq (usually > 300MHz)
-              if (freq > 0) {
-                weightedFreq += (double)freq * residency;
+                // Sanity check freq (usually > 300MHz)
+                if (freq > 0) {
+                  weightedFreq += (double)freq * residency;
+                }
               }
             }
           }
@@ -1671,36 +2293,32 @@ PowerMetrics samplePowerMetrics(int durationMs) {
           }
         }
       }
-    } else if (cfStringMatch(groupRef, "AMC Stats")) {
+    } else if (strcmp(grp, "AMC Stats") == 0) {
       // Sum memory bandwidth from non-DCS channels to avoid double counting.
       // DCS (DRAM Command Scheduler) channels are a subset of the total.
       // Works on M-series chips (M1, M2, M3, M4, M5, etc.).
-      char channelName[256] = {0};
-      CFStringGetCString(channelRef, channelName, sizeof(channelName),
-                         kCFStringEncodingUTF8);
-      if (strstr(channelName, "DCS") == NULL) {
+      if (strstr(chn, "DCS") == NULL) {
         int64_t val = IOReportSimpleGetIntegerValue(item, 0);
-        if (strstr(channelName, "RD") != NULL) {
+        if (strstr(chn, "RD") != NULL) {
           metrics.dramReadBytes += val;
-        } else if (strstr(channelName, "WR") != NULL) {
+        } else if (strstr(chn, "WR") != NULL) {
           metrics.dramWriteBytes += val;
         }
       }
-    } else if (cfStringMatch(groupRef, "PMP")) {
+    } else if (strcmp(grp, "PMP") == 0) {
       // PMP group provides DRAM bandwidth on A-series chips (A18 Pro, etc.)
       // where AMC Stats channels exist but produce no delta data.
-      // Channels are in subgroup "DRAM BW" with names like "F1 RD", "F1 WR",
-      // "F2 RD", etc. and unit "B" (bytes). Sum all frequency bins.
+      char sub[64] = {0};
       CFStringRef subgroupRef = IOReportChannelGetSubGroup(item);
-      if (subgroupRef != NULL && cfStringMatch(subgroupRef, "DRAM BW")) {
-        char channelName[256] = {0};
-        CFStringGetCString(channelRef, channelName, sizeof(channelName),
-                           kCFStringEncodingUTF8);
+      if (subgroupRef != NULL) {
+        CFStringGetCString(subgroupRef, sub, sizeof(sub), kCFStringEncodingUTF8);
+      }
+      if (strcmp(sub, "DRAM BW") == 0) {
         int64_t val = IOReportSimpleGetIntegerValue(item, 0);
         if (val > 0) {
-          if (strstr(channelName, "RD") != NULL) {
+          if (strstr(chn, "RD") != NULL) {
             pmpDramReadBytes += val;
-          } else if (strstr(channelName, "WR") != NULL) {
+          } else if (strstr(chn, "WR") != NULL) {
             pmpDramWriteBytes += val;
           }
         }
@@ -1770,8 +2388,8 @@ PowerMetrics samplePowerMetrics(int durationMs) {
     metrics.dramWriteBytes = kperfWr;
   }
 
-
-  metrics.socTemp = readSocTemperature(&metrics.cpuTemp, &metrics.gpuTemp);
+  // Defer readSocTemperature — try to derive CPU/GPU temps from HID per-core data first.
+  // This avoids a redundant HID service enumeration on systems where HID provides good data.
 
   if (g_smcConn) {
     metrics.systemPower = SMCGetFloatValue(g_smcConn, "PSTR");
@@ -1782,18 +2400,151 @@ PowerMetrics samplePowerMetrics(int durationMs) {
 
   // Read all temperature sensors
   loadAllTempSensors();
-  metrics.tempSensorCount = g_all_temp_sensor_count;
-  for (int i = 0; i < g_all_temp_sensor_count && i < 128; i++) {
-    metrics.temps[i] = g_all_temp_sensors[i];
-    // Refresh sensor value
-    if (g_smcConn) {
-      float v = (float)SMCGetFloatValue(g_smcConn, g_all_temp_sensors[i].key);
-      if (v > 0)
-        metrics.temps[i].value = v;
+
+  // Strategy: Validate HID per-core data against expected core counts.
+  // Use HID for a category ONLY if it provides >= expected physical cores.
+  // Otherwise fall back to SMC (with category-aware 10°C threshold).
+  // This prevents M2 Max's incomplete/garbage HID from replacing good SMC data.
+
+  // Step 1: Read HID per-core sensors and get per-category counts
+  temp_sensor_t hidSensors[64];
+  int hidEcount = 0, hidPcount = 0, hidScount = 0, hidGPUcount = 0;
+  int hidTotal = readHIDCoreTempSensors(hidSensors, 64,
+                                         &hidEcount, &hidPcount,
+                                         &hidScount, &hidGPUcount);
+
+  // Step 2: Decide per-category: use HID or SMC?
+  // Use HID only if count >= expected physical cores (validation)
+  int useHidEcore = (hidEcount >= g_expected_ecores && g_expected_ecores > 0);
+  int useHidPcore = (hidPcount >= g_expected_pcores && g_expected_pcores > 0);
+  int useHidScore = (hidScount >= g_expected_scores && g_expected_scores > 0);
+  // GPU: use HID if it has any sensors (no expected count to compare)
+  int useHidGPU = (hidGPUcount > 0);
+
+  // Derive CPU/GPU temps from HID data when available.
+  // If HID covers both CPU and GPU, skip the expensive readSocTemperature call.
+  int gotCpuFromHID = 0, gotGpuFromHID = 0;
+  if (useHidEcore || useHidPcore || useHidScore) {
+    // Average all CPU core temps from HID
+    float cpuSum = 0;
+    int cpuCnt = 0;
+    for (int i = 0; i < hidTotal; i++) {
+      char hk = hidSensors[i].key[1];
+      if ((hk == 'e' && useHidEcore) || (hk == 'p' && useHidPcore) ||
+          (hk == 's' && useHidScore)) {
+        cpuSum += hidSensors[i].value;
+        cpuCnt++;
+      }
+    }
+    if (cpuCnt > 0) {
+      metrics.cpuTemp = cpuSum / cpuCnt;
+      gotCpuFromHID = 1;
+    }
+  }
+  if (useHidGPU) {
+    float gpuSum = 0;
+    int gpuCnt = 0;
+    for (int i = 0; i < hidTotal; i++) {
+      if (hidSensors[i].key[1] == 'g') {
+        gpuSum += hidSensors[i].value;
+        gpuCnt++;
+      }
+    }
+    if (gpuCnt > 0) {
+      metrics.gpuTemp = gpuSum / gpuCnt;
+      gotGpuFromHID = 1;
     }
   }
 
+  // Only call readSocTemperature if HID didn't provide both CPU and GPU temps
+  float fallbackCpuTemp = 0.0f;
+  float fallbackGpuTemp = 0.0f;
+  if (!gotCpuFromHID || !gotGpuFromHID) {
+    metrics.socTemp = readSocTemperature(&fallbackCpuTemp, &fallbackGpuTemp);
+    if (!gotCpuFromHID && fallbackCpuTemp > 0) metrics.cpuTemp = fallbackCpuTemp;
+    if (!gotGpuFromHID && fallbackGpuTemp > 0) metrics.gpuTemp = fallbackGpuTemp;
+  } else {
+    metrics.socTemp = (metrics.cpuTemp > metrics.gpuTemp) ? metrics.cpuTemp : metrics.gpuTemp;
+  }
+
+  int validSensorCount = 0;
+
+  // Step 3: Add validated HID sensors for categories that passed validation
+  if (hidTotal > 0) {
+    for (int i = 0; i < hidTotal && validSensorCount < 512; i++) {
+      char hk = hidSensors[i].key[1]; // e, p, s, or g
+      int include = 0;
+      if (hk == 'e' && useHidEcore) include = 1;
+      else if (hk == 'p' && useHidPcore) include = 1;
+      else if (hk == 's' && useHidScore) include = 1;
+      else if (hk == 'g' && useHidGPU) include = 1;
+      if (include) {
+        metrics.temps[validSensorCount++] = hidSensors[i];
+      }
+    }
+  }
+
+  // Step 4: Add SMC sensors, skipping categories already covered by HID.
+  // Tiered caching: slow-changing sensors (Ambient, Board, SSD, VRM, etc.)
+  // are only read from SMC every 5th tick to reduce IPC overhead.
+  static int smcTempTick = 0;
+  int refreshSlowSensors = (smcTempTick % 5 == 0);  // Refresh every 5th tick
+  smcTempTick++;
+
+  for (int i = 0; i < g_all_temp_sensor_count && validSensorCount < 512; i++) {
+    char k1 = g_all_temp_sensors[i].key[1];
+
+    // Check if this SMC key's category is already covered by HID
+    int coveredByHID = 0;
+    if ((k1 == 'e') && useHidEcore) coveredByHID = 1;
+    else if ((k1 == 'p' || k1 == 'f') && useHidPcore) coveredByHID = 1;
+    else if ((k1 == 's') && useHidScore) coveredByHID = 1;
+    else if ((k1 == 'g' || k1 == 'R') && useHidGPU) coveredByHID = 1;
+
+    if (coveredByHID) continue;
+
+    // Classify: silicon core sensors change rapidly, environmental sensors don't
+    int isCoreKey = (k1 == 'p' || k1 == 'e' || k1 == 'f' || k1 == 's' ||
+                     k1 == 'c' || k1 == 'C' || k1 == 'g' || k1 == 'R');
+    int isSlowSensor = !isCoreKey;  // Ambient, Board, SSD, VRM, etc.
+
+    float v;
+    if (isSlowSensor && !refreshSlowSensors && g_all_temp_sensors[i].value > 0.0f) {
+      // Use cached value for slow-changing sensors between refreshes
+      v = g_all_temp_sensors[i].value;  // Last known value
+    } else if (g_smcConn) {
+      v = (float)SMCGetFloatValue(g_smcConn, g_all_temp_sensors[i].key);
+      g_all_temp_sensors[i].value = v;  // Update cached value
+    } else {
+      v = g_all_temp_sensors[i].value;
+    }
+
+    float minTemp = 0.0f;
+    if (isCoreKey) {
+      minTemp = 10.0f;
+    }
+
+    if (v > minTemp && v <= 200) {
+      metrics.temps[validSensorCount] = g_all_temp_sensors[i];
+      metrics.temps[validSensorCount].value = v;
+      validSensorCount++;
+    }
+  }
+
+  // Step 5: Append NVMe SMART temperatures.
+  // Uses the same slow-sensor tick as SMC environmental sensors.
+  if (refreshSlowSensors) {
+    readNVMeSMARTTemps();
+  }
+  for (int i = 0; i < g_nvme_temp_count && validSensorCount < 512; i++) {
+    metrics.temps[validSensorCount++] = g_nvme_temps[i];
+  }
+
+  metrics.tempSensorCount = validSensorCount;
+
   CFRelease(delta);
+
+  } // @autoreleasepool
 
   return metrics;
 }
@@ -1808,6 +2559,15 @@ void cleanupIOReport() {
     SMCClose(g_smcConn);
     g_smcConn = 0;
   }
+  // Clean up cached HID client
+  if (g_hidClient) {
+    CFRelease(g_hidClient);
+    g_hidClient = NULL;
+  }
+  if (g_hidMatching) {
+    CFRelease(g_hidMatching);
+    g_hidMatching = NULL;
+  }
   // Clean up kperf
   if (g_kperf_active && g_forceCtrs) {
     g_forceCtrs(0);
@@ -1820,8 +2580,10 @@ void cleanupIOReport() {
 }
 
 int getThermalState() {
-  NSProcessInfo *info = [NSProcessInfo processInfo];
-  return (int)[info thermalState];
+  @autoreleasepool {
+    NSProcessInfo *info = [NSProcessInfo processInfo];
+    return (int)[info thermalState];
+  }
 }
 
 void debugMonitorChannels(int durationMs) { (void)durationMs; }
