@@ -132,9 +132,10 @@ int startDisplayFPSCounter(void) {
         }
       });
 
-  if (g_dfpsStream) {
-    fn_DFPSStart(g_dfpsStream);
+  if (!g_dfpsStream) {
+    return -1; // Stream creation failed (no display, permission denied, etc.)
   }
+  fn_DFPSStart(g_dfpsStream);
 
   g_dfpsLastTimestamp = mach_absolute_time();
 
