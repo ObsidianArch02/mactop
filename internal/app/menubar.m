@@ -1170,16 +1170,19 @@ int initMenuBar(void) {
   }
 }
 void updateMenuBarMetrics(menubar_metrics_t *m) {
-  if (g_delegate == nil || m == NULL)
-    return;
-  menubar_metrics_t copy = *m;
-  NSValue *val = [NSValue valueWithBytes:&copy
-                                objCType:@encode(menubar_metrics_t)];
-  dispatch_async(dispatch_get_main_queue(), ^{
-    @autoreleasepool {
-      [g_delegate performMetricUpdate:val];
-    }
-  });
+  @autoreleasepool {
+    if (g_delegate == nil || m == NULL)
+      return;
+    menubar_metrics_t copy = *m;
+    NSValue *val = [NSValue valueWithBytes:&copy
+                                  objCType:@encode(menubar_metrics_t)];
+    dispatch_async(dispatch_get_main_queue(), ^{
+      // The inner pool is optional now but kept for safety/consistency if more is added later.
+      @autoreleasepool {
+        [g_delegate performMetricUpdate:val];
+      }
+    });
+  }
 }
 void pumpMenuBarEvents(void) {
   @autoreleasepool {

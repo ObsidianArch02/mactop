@@ -2014,6 +2014,8 @@ PowerMetrics samplePowerMetrics(int durationMs) {
     }
   }
 
+  @autoreleasepool {
+
   CFDictionaryRef sample1 =
       IOReportCreateSamples(g_subscription, g_channels, NULL);
 
@@ -2497,6 +2499,8 @@ PowerMetrics samplePowerMetrics(int durationMs) {
 
   CFRelease(delta);
 
+  } // @autoreleasepool
+
   return metrics;
 }
 
@@ -2531,8 +2535,10 @@ void cleanupIOReport() {
 }
 
 int getThermalState() {
-  NSProcessInfo *info = [NSProcessInfo processInfo];
-  return (int)[info thermalState];
+  @autoreleasepool {
+    NSProcessInfo *info = [NSProcessInfo processInfo];
+    return (int)[info thermalState];
+  }
 }
 
 void debugMonitorChannels(int durationMs) { (void)durationMs; }
