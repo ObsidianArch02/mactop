@@ -667,7 +667,7 @@ func buildHeadlessTempGroups(sensors []TempSensor, sysInfo SystemInfo) []Headles
 		}
 	}
 
-	preferred := []string{"CPU E-Core", "CPU P-Core", "CPU S-Core", "CPU Core", "CPU Die", "GPU", "SoC Package", "Memory", "SSD", "NAND", "Ambient", "VRM", "Board", "Thunderbolt", "Wireless", "Display"}
+	preferred := []string{"CPU E-Core", "CPU P-Core", "CPU S-Core", "CPU Core", "CPU Die", "GPU", "SoC Package", "Memory", "SSD", "NAND", "NVMe", "Ambient", "VRM", "Board", "Thunderbolt", "Wireless", "Display"}
 	var result []HeadlessTempGroup
 	seen := make(map[string]bool)
 	for _, name := range preferred {

@@ -408,13 +408,11 @@ var sensorGroupMap = map[byte]string{
 	'D': "Display", 'd': "Display", 'L': "Display",
 }
 
-// sensorGroupName returns the group category for a sensor based on its SMC key.
-func sensorGroupName(key string) string {
-	if len(key) < 2 {
-		return "Other"
-	}
-	// Handle HID synthetic keys (H prefix from IOHIDEventSystemClient)
-	if key[0] == 'H' {
+// getNonSMCSensorGroup handles synthetic sensor keys that don't start with 'T'.
+// Returns group name or empty string if not a known non-SMC key.
+func getNonSMCSensorGroup(key string) string {
+	switch key[0] {
+	case 'H': // HID synthetic keys from IOHIDEventSystemClient
 		switch key[1] {
 		case 'e':
 			return "CPU E-Core"
@@ -425,9 +423,23 @@ func sensorGroupName(key string) string {
 		case 'g':
 			return "GPU"
 		}
+	case 'N': // NVMe SMART sensors use 'Nv' prefix
+		if key[1] == 'v' {
+			return "NVMe"
+		}
+	}
+	return ""
+}
+
+// sensorGroupName returns the group category for a sensor based on its SMC key.
+func sensorGroupName(key string) string {
+	if len(key) < 2 {
 		return "Other"
 	}
 	if key[0] != 'T' {
+		if group := getNonSMCSensorGroup(key); group != "" {
+			return group
+		}
 		return "Other"
 	}
 	// Multi-char prefix matching for Apple Silicon specifics
@@ -549,7 +561,7 @@ func buildGroupedTempLines(sensors []TempSensor, themeColor string) []string {
 	// Preferred display order — most important first
 	preferred := []string{
 		"CPU E-Core", "CPU P-Core", "CPU S-Core", "CPU Core", "CPU Die",
-		"GPU", "SoC Package", "Memory", "SSD", "NAND",
+		"GPU", "SoC Package", "Memory", "SSD", "NAND", "NVMe",
 		"Ambient", "VRM", "Board", "Thunderbolt",
 		"Wireless", "Display",
 	}

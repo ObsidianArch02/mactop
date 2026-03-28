@@ -808,7 +808,9 @@ func updateCPUUI(cpuMetrics CPUMetrics) {
 	memoryGauge.Percent = int(memoryPercent)
 
 	updateMemoryHistory(memoryMetrics)
-	finalizeCPUUI(totalUsage, cpuMetrics.CoreUsages, cpuMetrics, memoryMetrics)
+	if len(cpuMetrics.CoreUsages) > 0 {
+		finalizeCPUUI(totalUsage, cpuMetrics.CoreUsages, cpuMetrics, memoryMetrics)
+	}
 }
 
 func updateCPUHistory(totalUsage float64) {

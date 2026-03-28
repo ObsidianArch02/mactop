@@ -6,6 +6,7 @@
 #import <CoreWLAN/CoreWLAN.h>
 #import <Foundation/Foundation.h>
 #import <IOKit/IOKitLib.h>
+#import <IOKit/IOCFPlugIn.h>
 #include <mach/mach_host.h>
 #include <mach/mach_init.h>
 #include <mach/processor_info.h>
@@ -1079,6 +1080,10 @@ static char g_gpu_keys[64][5];
 static int g_gpu_key_count = 0;
 
 static const char *tempSensorName(const char *key) {
+  // NVMe SMART sensors use 'Nv' prefix (non-SMC, synthetic keys)
+  if (key[0] == 'N' && key[1] == 'v')
+    return "NVMe";
+
   if (key[0] != 'T')
     return "Unknown";
 
@@ -1414,6 +1419,10 @@ int resetFansToAuto() {
   return 0;
 }
 
+// Cached NVMe SMART temps — refreshed periodically, seeded by HID NAND fallback
+static temp_sensor_t g_nvme_temps[16];
+static int g_nvme_temp_count = 0;
+
 // Read per-core temperature sensors from IOHIDEventSystemClient.
 // Returns the number of sensors written into the output array.
 // Also reports per-category counts through output parameters.
@@ -1515,6 +1524,48 @@ static int readHIDCoreTempSensors(temp_sensor_t *out, int maxSensors,
   *outScount = sIdx;
   *outGPUcount = gpuIdx;
 
+  // Seed NVMe temperatures from HID NAND sensors (AppleEmbeddedNVMeTemperatureSensor)
+  // if the SMART plugin cache is empty (plugin fails for Apple embedded NVMe).
+  // This provides reliable internal NVMe drive temperature via IOHIDEventSystemClient.
+  if (g_nvme_temp_count == 0 && services != NULL) {
+    int nvmeIdx = 0;
+    for (CFIndex i = 0; i < svcCount && nvmeIdx < 16; i++) {
+      IOHIDServiceClientRef service =
+          (IOHIDServiceClientRef)CFArrayGetValueAtIndex(services, i);
+      if (service == NULL) continue;
+
+      CFStringRef productRef =
+          IOHIDServiceClientCopyProperty(service, CFSTR("Product"));
+      if (productRef == NULL) continue;
+
+      char product[512] = {0};
+      CFStringGetCString(productRef, product, sizeof(product),
+                         kCFStringEncodingUTF8);
+
+      // Match "NAND CH0 temp", "NAND CH1 temp", etc.
+      if (strstr(product, "NAND") != NULL && strstr(product, "temp") != NULL) {
+        IOHIDEventRef event = IOHIDServiceClientCopyEvent(
+            service, kIOHIDEventTypeTemperature, 0, 0);
+        if (event != NULL) {
+          double temp = IOHIDEventGetFloatValue(event,
+              kIOHIDEventTypeTemperature << 16);
+          CFRelease(event);
+          if (temp > 0.0 && temp < 150.0) {
+            temp_sensor_t *s = &g_nvme_temps[nvmeIdx];
+            snprintf(s->key, sizeof(s->key), "Nv%02X", nvmeIdx);
+            snprintf(s->name, sizeof(s->name), "NVMe %s", product);
+            s->value = (float)temp;
+            nvmeIdx++;
+          }
+        }
+      }
+      CFRelease(productRef);
+    }
+    if (nvmeIdx > 0) {
+      g_nvme_temp_count = nvmeIdx;
+    }
+  }
+
   CFRelease(services);
   return count;
 }
@@ -1605,6 +1656,160 @@ static float readSocTemperature(float *outCpuTemp, float *outGpuTemp) {
 
   // Return max of both as "SoC Temp" for backward compatibility if needed
   return (*outCpuTemp > *outGpuTemp) ? *outCpuTemp : *outGpuTemp;
+}
+
+// === NVMe SMART Temperature Reading ===
+// Uses Apple's private NVMeSMARTLib.plugin to read SMART health log
+// from NVMe drives (internal + external Thunderbolt SSDs).
+// Temperature is at bytes 1-2 of the standard NVMe SMART log (Kelvin, LE16).
+
+// NVMe SMART data structure (NVM Express Spec 5.10.1.2)
+typedef struct {
+  uint8_t  critical_warning;
+  uint8_t  temperature[2];     // Composite temp in Kelvin (little-endian)
+  uint8_t  available_spare;
+  uint8_t  available_spare_threshold;
+  uint8_t  percentage_used;
+  uint8_t  reserved1[26];
+  uint8_t  data_units_read[16];
+  uint8_t  data_units_written[16];
+  uint8_t  host_read_commands[16];
+  uint8_t  host_write_commands[16];
+  uint8_t  controller_busy_time[16];
+  uint8_t  power_cycles[16];
+  uint8_t  power_on_hours[16];
+  uint8_t  unsafe_shutdowns[16];
+  uint8_t  media_errors[16];
+  uint8_t  num_err_log_entries[16];
+  uint8_t  reserved2[320];
+} NVMeSMARTData;
+
+// IONVMeSMARTInterface vtable (matches NVMeSMARTLib.plugin / smartmontools)
+typedef struct IONVMeSMARTInterface {
+  IUNKNOWN_C_GUTS;
+  UInt16 version;
+  UInt16 revision;
+  IOReturn (*SMARTReadData)(void *interface, NVMeSMARTData *data);
+  IOReturn (*GetIdentifyData)(void *interface, void *data, unsigned int ns);
+  UInt64 reserved0;
+  UInt64 reserved1;
+  IOReturn (*GetLogPage)(void *interface, void *data, unsigned int logPageId, unsigned int numDWords);
+} IONVMeSMARTInterface;
+
+
+static void readNVMeSMARTTemps(void) {
+  // Use local storage — only update global cache if we get results.
+  // This preserves cached data when the SMART plugin intermittently fails
+  // (common on Apple Silicon embedded NVMe where the user client is unstable).
+  temp_sensor_t localTemps[16];
+  int localCount = 0;
+
+  // kIONVMeSMARTUserClientTypeID
+  CFUUIDRef smartFactory = CFUUIDGetConstantUUIDWithBytes(NULL,
+      0xAA, 0x0F, 0xA6, 0xF9, 0xC2, 0xD6, 0x45, 0x7F,
+      0xB1, 0x0B, 0x59, 0xA1, 0x32, 0x53, 0x29, 0x2F);
+  // kIONVMeSMARTInterfaceID
+  CFUUIDRef smartInterfaceID = CFUUIDGetConstantUUIDWithBytes(NULL,
+      0xCC, 0xD1, 0xDB, 0x19, 0xFD, 0x9A, 0x4D, 0xAF,
+      0xBF, 0x95, 0x12, 0x45, 0x4B, 0x23, 0x0A, 0xB6);
+
+  // Match all block storage devices, then filter for NVMe SMART support
+  CFMutableDictionaryRef match = IOServiceMatching("IOBlockStorageDevice");
+  io_iterator_t iter;
+  kern_return_t kr = IOServiceGetMatchingServices(kIOMainPortDefault, match, &iter);
+  if (kr != kIOReturnSuccess) return;
+
+  io_service_t svc;
+  while ((svc = IOIteratorNext(iter)) != 0 && localCount < 16) {
+    // Check for "NVMe SMART Capable" property
+    CFTypeRef smartCapable = IORegistryEntryCreateCFProperty(
+        svc, CFSTR("NVMe SMART Capable"), kCFAllocatorDefault, 0);
+    if (!smartCapable) {
+      IOObjectRelease(svc);
+      continue;
+    }
+    int isSmart = 0;
+    if (CFGetTypeID(smartCapable) == CFBooleanGetTypeID()) {
+      isSmart = CFBooleanGetValue((CFBooleanRef)smartCapable) ? 1 : 0;
+    } else if (CFGetTypeID(smartCapable) == CFStringGetTypeID()) {
+      char buf[8];
+      CFStringGetCString((CFStringRef)smartCapable, buf, sizeof(buf), kCFStringEncodingUTF8);
+      isSmart = (strcasecmp(buf, "Yes") == 0) ? 1 : 0;
+    }
+    CFRelease(smartCapable);
+    if (!isSmart) {
+      IOObjectRelease(svc);
+      continue;
+    }
+
+    // Get model name from "Device Characteristics" dictionary
+    char model[64] = "NVMe";
+    CFDictionaryRef devChars = IORegistryEntryCreateCFProperty(
+        svc, CFSTR("Device Characteristics"), kCFAllocatorDefault, 0);
+    if (devChars && CFGetTypeID(devChars) == CFDictionaryGetTypeID()) {
+      CFStringRef prodName = CFDictionaryGetValue(devChars, CFSTR("Product Name"));
+      if (prodName && CFGetTypeID(prodName) == CFStringGetTypeID()) {
+        CFStringGetCString(prodName, model, sizeof(model), kCFStringEncodingUTF8);
+        size_t len = strlen(model);
+        while (len > 0 && model[len - 1] == ' ') model[--len] = '\0';
+      }
+    }
+    if (devChars) CFRelease(devChars);
+
+    // Create plugin interface for SMART reading
+    IOCFPlugInInterface **plugin = NULL;
+    SInt32 score = 0;
+    kr = IOCreatePlugInInterfaceForService(svc, smartFactory,
+                                           kIOCFPlugInInterfaceID,
+                                           &plugin, &score);
+    if (kr != kIOReturnSuccess || !plugin) {
+      IOObjectRelease(svc);
+      continue;
+    }
+
+    // Query for the NVMe SMART interface
+    IONVMeSMARTInterface **smartInterface = NULL;
+    HRESULT res = (*plugin)->QueryInterface(plugin,
+        CFUUIDGetUUIDBytes(smartInterfaceID), (LPVOID *)&smartInterface);
+    (*plugin)->Release(plugin);
+
+    if (res != S_OK || !smartInterface) {
+      IOObjectRelease(svc);
+      continue;
+    }
+
+    // Read SMART data
+    NVMeSMARTData smartData;
+    memset(&smartData, 0, sizeof(smartData));
+    IOReturn readResult = (*smartInterface)->SMARTReadData(smartInterface, &smartData);
+
+    if (readResult == kIOReturnSuccess) {
+      // Temperature: bytes 1-2, little-endian uint16 in Kelvin
+      uint16_t tempK = (uint16_t)smartData.temperature[0] |
+                       ((uint16_t)smartData.temperature[1] << 8);
+      if (tempK > 0 && tempK < 1000) {
+        float tempC = (float)tempK - 273.15f;
+        if (tempC > 0.0f && tempC < 150.0f) {
+          temp_sensor_t *s = &localTemps[localCount];
+          snprintf(s->key, sizeof(s->key), "Nv%02X", localCount);
+          snprintf(s->name, sizeof(s->name), "NVMe %.50s", model);
+          s->value = tempC;
+          localCount++;
+        }
+      }
+    }
+
+    (*smartInterface)->Release(smartInterface);
+    IOObjectRelease(svc);
+  }
+  IOObjectRelease(iter);
+
+  // Only update global cache if we got results.
+  // If all reads failed, preserve previous cached data.
+  if (localCount > 0) {
+    memcpy(g_nvme_temps, localTemps, localCount * sizeof(temp_sensor_t));
+    g_nvme_temp_count = localCount;
+  }
 }
 
 PowerMetrics samplePowerMetrics(int durationMs) {
@@ -2085,6 +2290,16 @@ PowerMetrics samplePowerMetrics(int durationMs) {
       validSensorCount++;
     }
   }
+
+  // Step 5: Append NVMe SMART temperatures.
+  // Uses the same slow-sensor tick as SMC environmental sensors.
+  if (refreshSlowSensors) {
+    readNVMeSMARTTemps();
+  }
+  for (int i = 0; i < g_nvme_temp_count && validSensorCount < 512; i++) {
+    metrics.temps[validSensorCount++] = g_nvme_temps[i];
+  }
+
   metrics.tempSensorCount = validSensorCount;
 
   CFRelease(delta);
