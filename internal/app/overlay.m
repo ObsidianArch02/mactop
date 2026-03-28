@@ -2,6 +2,7 @@
 // overlay.m - Native macOS floating overlay HUD window
 
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>
 #include <dispatch/dispatch.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -92,6 +93,7 @@ static overlay_metrics_t g_overlay_metrics;
 static double cpuSparkHistory[OVERLAY_SPARKLINE_HISTORY] = {0};
 static double gpuSparkHistory[OVERLAY_SPARKLINE_HISTORY] = {0};
 static double fpsSparkHistory[OVERLAY_SPARKLINE_HISTORY] = {0};
+static BOOL g_overlay_expanded = NO;
 
 static void pushSparkHistory(double *buf, double val) {
   memmove(buf, buf + 1, (OVERLAY_SPARKLINE_HISTORY - 1) * sizeof(double));
@@ -284,6 +286,8 @@ static void stopFPSCounter(void) {
 
 // ---------- Forward declarations ----------
 
+void updateOverlayMetrics(overlay_metrics_t *m);
+
 @class OverlayContentView;
 @class OverlayWindow;
 
@@ -385,6 +389,14 @@ static NSInteger g_opacityFlashCountdown = 0; // Show opacity indicator for N fr
 
 // Allow dragging the window by dragging anywhere on the overlay
 - (void)mouseDown:(NSEvent *)event {
+  NSPoint pt = [self convertPoint:[event locationInWindow] fromView:nil];
+  NSRect toggleRect = NSMakeRect(self.bounds.size.width / 2.0 - 40, self.bounds.size.height - 35, 80, 35);
+  if (NSPointInRect(pt, toggleRect)) {
+    g_overlay_expanded = !g_overlay_expanded;
+    updateOverlayMetrics(&g_overlay_metrics);
+    return;
+  }
+
   self.dragStart = [NSEvent mouseLocation];
   self.windowStart = self.window.frame.origin;
   self.dragging = YES;
@@ -684,7 +696,7 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
   }
 
   // ANE
-  if (cfg.show_ane) {
+  if (cfg.show_ane && g_overlay_expanded) {
     drawMetricBar(@"ANE", m.ane_percent, overlayAccentCyan(), NULL, NO);
   }
 
@@ -709,7 +721,7 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
     y += rowH;
 
     // Swap — only show when swap is actually being used
-    if (m.swap_used_bytes > 0 && m.swap_total_bytes > 0) {
+    if (m.swap_used_bytes > 0 && m.swap_total_bytes > 0 && g_overlay_expanded) {
       double swapGB =
           (double)m.swap_used_bytes / (1024.0 * 1024.0 * 1024.0);
       double swapTotalGB =
@@ -733,100 +745,133 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
   }
 
   // Separator
-  [[NSColor colorWithWhite:1.0 alpha:0.06] set];
-  [NSBezierPath fillRect:NSMakeRect(padX, y, contentW, 1)];
-  y += 5;
+  if (g_overlay_expanded) {
+    [[NSColor colorWithWhite:1.0 alpha:0.06] set];
+    [NSBezierPath fillRect:NSMakeRect(padX, y, contentW, 1)];
+    y += 5;
 
-  // Power
-  if (cfg.show_power) {
-    NSString *powerStr =
-        [NSString stringWithFormat:@"%.1fW", m.package_watts];
-    drawMetricKV(@"Power", powerStr, overlayAccentYellow());
+    // Power
+    if (cfg.show_power) {
+      NSString *powerStr =
+          [NSString stringWithFormat:@"%.1fW", m.package_watts];
+      drawMetricKV(@"Power", powerStr, overlayAccentYellow());
 
-    // Individual power breakdown — always show all to prevent jumping
-    drawMetricKV(@"  CPU", [NSString stringWithFormat:@"%.1fW", m.cpu_watts], overlayDimText());
-    drawMetricKV(@"  GPU", [NSString stringWithFormat:@"%.1fW", m.gpu_watts], overlayDimText());
-    drawMetricKV(@"  ANE", [NSString stringWithFormat:@"%.1fW", m.ane_watts], overlayDimText());
-    drawMetricKV(@"  DRAM", [NSString stringWithFormat:@"%.1fW", m.dram_watts], overlayDimText());
-  }
-
-  // DRAM Bandwidth
-  if (cfg.show_bandwidth) {
-    NSString *bwStr =
-        [NSString stringWithFormat:@"%.1f GB/s", m.dram_bw_combined_gbs];
-    drawMetricKV(@"DRAM BW", bwStr, overlayAccentBlue());
-  }
-
-  // GPU Freq + TFLOPs
-  if (cfg.show_gpu_freq) {
-    NSString *freqStr;
-    if (m.tflops_fp32 > 0) {
-      freqStr = [NSString
-          stringWithFormat:@"%dMHz • %.1f TFLOPS", m.gpu_freq_mhz,
-                           m.tflops_fp32];
-    } else {
-      freqStr = [NSString stringWithFormat:@"%d MHz", m.gpu_freq_mhz];
+      // Individual power breakdown — always show all to prevent jumping
+      drawMetricKV(@"  CPU", [NSString stringWithFormat:@"%.1fW", m.cpu_watts], overlayDimText());
+      drawMetricKV(@"  GPU", [NSString stringWithFormat:@"%.1fW", m.gpu_watts], overlayDimText());
+      drawMetricKV(@"  ANE", [NSString stringWithFormat:@"%.1fW", m.ane_watts], overlayDimText());
+      drawMetricKV(@"  DRAM", [NSString stringWithFormat:@"%.1fW", m.dram_watts], overlayDimText());
     }
-    drawMetricKV(@"GPU Freq", freqStr, overlayAccentOrange());
-  }
 
-  // Separator
-  [[NSColor colorWithWhite:1.0 alpha:0.06] set];
-  [NSBezierPath fillRect:NSMakeRect(padX, y, contentW, 1)];
-  y += 5;
-
-  // Temps
-  if (cfg.show_temps) {
-    NSString *tempStr;
-    if (m.gpu_temp > 0) {
-      tempStr = [NSString
-          stringWithFormat:@"CPU %.0f°C  GPU %.0f°C", m.cpu_temp, m.gpu_temp];
-    } else {
-      tempStr = [NSString stringWithFormat:@"%.0f°C", m.cpu_temp];
+    // DRAM Bandwidth
+    if (cfg.show_bandwidth) {
+      NSString *bwStr =
+          [NSString stringWithFormat:@"%.1f GB/s", m.dram_bw_combined_gbs];
+      drawMetricKV(@"DRAM BW", bwStr, overlayAccentBlue());
     }
-    NSColor *tempColor = overlayBrightText();
-    if (m.cpu_temp >= 90 || m.gpu_temp >= 90)
-      tempColor = overlayAccentRed();
-    else if (m.cpu_temp >= 70 || m.gpu_temp >= 70)
-      tempColor = overlayAccentYellow();
-    drawMetricKV(@"Temps", tempStr, tempColor);
-  }
 
-  // Thermal state
-  if (cfg.show_thermals) {
-    NSString *thermalStr =
-        [NSString stringWithUTF8String:m.thermal_state];
-    if (thermalStr.length == 0)
-      thermalStr = @"Unknown";
-    NSColor *thermalColor = overlayAccentGreen();
-    if ([thermalStr containsString:@"Critical"])
-      thermalColor = overlayAccentRed();
-    else if ([thermalStr containsString:@"Serious"])
-      thermalColor = overlayAccentRed();
-    else if ([thermalStr containsString:@"Fair"])
-      thermalColor = overlayAccentYellow();
-    drawMetricKV(@"Thermal", thermalStr, thermalColor);
-  }
-
-  // Fans
-  if (cfg.show_fans && m.fan_count > 0) {
-    NSMutableString *fanStr = [NSMutableString string];
-    for (int i = 0; i < m.fan_count && i < 4; i++) {
-      if (i > 0)
-        [fanStr appendString:@"  "];
-      [fanStr appendFormat:@"%dRPM", m.fan_rpm[i]];
+    // GPU Freq + TFLOPs
+    if (cfg.show_gpu_freq) {
+      NSString *freqStr;
+      if (m.tflops_fp32 > 0) {
+        freqStr = [NSString
+            stringWithFormat:@"%dMHz • %.1f TFLOPS", m.gpu_freq_mhz,
+                             m.tflops_fp32];
+      } else {
+        freqStr = [NSString stringWithFormat:@"%d MHz", m.gpu_freq_mhz];
+      }
+      drawMetricKV(@"GPU Freq", freqStr, overlayAccentOrange());
     }
-    drawMetricKV(@"Fans", fanStr, overlayDimText());
+
+    // Separator
+    [[NSColor colorWithWhite:1.0 alpha:0.06] set];
+    [NSBezierPath fillRect:NSMakeRect(padX, y, contentW, 1)];
+    y += 5;
+
+    // Temps
+    if (cfg.show_temps) {
+      NSString *tempStr;
+      if (m.gpu_temp > 0) {
+        tempStr = [NSString
+            stringWithFormat:@"CPU %.0f°C  GPU %.0f°C", m.cpu_temp, m.gpu_temp];
+      } else {
+        tempStr = [NSString stringWithFormat:@"%.0f°C", m.cpu_temp];
+      }
+      NSColor *tempColor = overlayBrightText();
+      if (m.cpu_temp >= 90 || m.gpu_temp >= 90)
+        tempColor = overlayAccentRed();
+      else if (m.cpu_temp >= 70 || m.gpu_temp >= 70)
+        tempColor = overlayAccentYellow();
+      drawMetricKV(@"Temps", tempStr, tempColor);
+    }
+
+    // Thermal state
+    if (cfg.show_thermals) {
+      NSString *thermalStr =
+          [NSString stringWithUTF8String:m.thermal_state];
+      if (thermalStr.length == 0)
+        thermalStr = @"Unknown";
+      NSColor *thermalColor = overlayAccentGreen();
+      if ([thermalStr containsString:@"Critical"])
+        thermalColor = overlayAccentRed();
+      else if ([thermalStr containsString:@"Serious"])
+        thermalColor = overlayAccentRed();
+      else if ([thermalStr containsString:@"Fair"])
+        thermalColor = overlayAccentYellow();
+      drawMetricKV(@"Thermal", thermalStr, thermalColor);
+    }
+
+    // Fans
+    if (cfg.show_fans && m.fan_count > 0) {
+      NSMutableString *fanStr = [NSMutableString string];
+      for (int i = 0; i < m.fan_count && i < 4; i++) {
+        if (i > 0)
+          [fanStr appendString:@"  "];
+        [fanStr appendFormat:@"%dRPM", m.fan_rpm[i]];
+      }
+      drawMetricKV(@"Fans", fanStr, overlayDimText());
+    }
+
+    // Network
+    if (cfg.show_network) {
+      NSString *netStr = [NSString
+          stringWithFormat:@"↓%@ ↑%@",
+                           formatOverlayThroughput(m.net_in_bytes_per_sec),
+                           formatOverlayThroughput(m.net_out_bytes_per_sec)];
+      drawMetricKV(@"Network", netStr, overlayDimText());
+    }
   }
 
-  // Network
-  if (cfg.show_network) {
-    NSString *netStr = [NSString
-        stringWithFormat:@"↓%@ ↑%@",
-                         formatOverlayThroughput(m.net_in_bytes_per_sec),
-                         formatOverlayThroughput(m.net_out_bytes_per_sec)];
-    drawMetricKV(@"Network", netStr, overlayDimText());
+  // Draw toggle arrow (liquid glass pill)
+  CGFloat arrowW = 40;
+  CGFloat arrowH = 16;
+  CGFloat arrowX = (W - arrowW) / 2.0;
+  CGFloat arrowY = self.bounds.size.height - arrowH - 8;
+
+  NSBezierPath *pill = [NSBezierPath bezierPathWithRoundedRect:NSMakeRect(arrowX, arrowY, arrowW, arrowH) xRadius:arrowH/2.0 yRadius:arrowH/2.0];
+  [[[NSColor whiteColor] colorWithAlphaComponent:0.08] setFill];
+  [pill fill];
+  [[[NSColor whiteColor] colorWithAlphaComponent:0.15] setStroke];
+  [pill setLineWidth:1.0];
+  [pill stroke];
+
+  NSBezierPath *chevron = [NSBezierPath bezierPath];
+  CGFloat cx = arrowX + arrowW / 2.0;
+  CGFloat cy = arrowY + arrowH / 2.0;
+  if (g_overlay_expanded) {
+    [chevron moveToPoint:NSMakePoint(cx - 5, cy + 2)];
+    [chevron lineToPoint:NSMakePoint(cx, cy - 3)];
+    [chevron lineToPoint:NSMakePoint(cx + 5, cy + 2)];
+  } else {
+    [chevron moveToPoint:NSMakePoint(cx - 5, cy - 2)];
+    [chevron lineToPoint:NSMakePoint(cx, cy + 3)];
+    [chevron lineToPoint:NSMakePoint(cx + 5, cy - 2)];
   }
+  [[[NSColor whiteColor] colorWithAlphaComponent:0.7] setStroke];
+  [chevron setLineWidth:2.0];
+  [chevron setLineCapStyle:NSLineCapStyleRound];
+  [chevron setLineJoinStyle:NSLineJoinStyleRound];
+  [chevron stroke];
 
   // Opacity indicator (flashes briefly when scroll-wheel adjusts opacity)
   if (g_opacityFlashCountdown > 0) {
@@ -954,26 +999,29 @@ void updateOverlayMetrics(overlay_metrics_t *m) {
 
     if (g_overlay_config.show_cpu) rows++;
     if (g_overlay_config.show_gpu) rows++;
-    if (g_overlay_config.show_ane) rows++;
+    if (g_overlay_config.show_ane && g_overlay_expanded) rows++;
     if (g_overlay_config.show_memory) {
       rows++;
-      if (localMetrics.swap_used_bytes > 0 && localMetrics.swap_total_bytes > 0)
+      if (localMetrics.swap_used_bytes > 0 && localMetrics.swap_total_bytes > 0 && g_overlay_expanded)
         rows++;
     }
-    baseH += 10; // separator
 
-    if (g_overlay_config.show_power) {
-      rows += 5; // Total + CPU + GPU + ANE + DRAM (always show all)
+    if (g_overlay_expanded) {
+      baseH += 10; // separator
+      if (g_overlay_config.show_power) {
+        rows += 5; // Total + CPU + GPU + ANE + DRAM (always show all)
+      }
+      if (g_overlay_config.show_bandwidth) rows++;
+      if (g_overlay_config.show_gpu_freq) rows++;
+      baseH += 10; // separator
+
+      if (g_overlay_config.show_temps) rows++;
+      if (g_overlay_config.show_thermals) rows++;
+      if (g_overlay_config.show_fans && localMetrics.fan_count > 0) rows++;
+      if (g_overlay_config.show_network) rows++;
     }
-    if (g_overlay_config.show_bandwidth) rows++;
-    if (g_overlay_config.show_gpu_freq) rows++;
-    baseH += 10; // separator
 
-    if (g_overlay_config.show_temps) rows++;
-    if (g_overlay_config.show_thermals) rows++;
-    if (g_overlay_config.show_fans && localMetrics.fan_count > 0) rows++;
-    if (g_overlay_config.show_network) rows++;
-
+    botPad = 28; // Space at the bottom for the toggle pill
     CGFloat newH = baseH + rows * rowH + botPad;
 
     NSRect frame = g_overlayWindow.frame;
@@ -982,15 +1030,22 @@ void updateOverlayMetrics(overlay_metrics_t *m) {
       CGFloat dy = newH - frame.size.height;
       frame.origin.y -= dy;
       frame.size.height = newH;
-      [g_overlayWindow setFrame:frame display:NO];
-
-      // Resize subviews
-      NSView *bgView = g_overlayWindow.contentView;
-      bgView.frame = NSMakeRect(0, 0, frame.size.width, newH);
-      g_contentView.frame = NSMakeRect(0, 0, frame.size.width, newH);
+      
+      [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+          context.duration = 0.25;
+          context.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+          // Use animator to animate resize
+          [[g_overlayWindow animator] setFrame:frame display:YES];
+      } completionHandler:^{
+          // Ensure layer bounds are correctly set. Subviews usually track window, but safe fallback:
+          NSView *bgView = g_overlayWindow.contentView;
+          bgView.frame = NSMakeRect(0, 0, frame.size.width, newH);
+          g_contentView.frame = NSMakeRect(0, 0, frame.size.width, newH);
+          [g_contentView setNeedsDisplay:YES];
+      }];
+    } else {
+      [g_contentView setNeedsDisplay:YES];
     }
-
-    [g_contentView setNeedsDisplay:YES];
   });
 }
 

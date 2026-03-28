@@ -1167,10 +1167,7 @@ func updateGPUUI(gpuMetrics GPUMetrics) {
 	}
 }
 
-func updateNetDiskUI(netdiskMetrics NetDiskMetrics) {
-	var sb strings.Builder
-
-	// Get cached link info (refreshed every 5 seconds)
+func getCachedLinkInfo() ([]EthernetLinkInfo, *WiFiLinkInfo) {
 	linkInfoMutex.RLock()
 	needsRefresh := time.Since(linkInfoLastUpdate) >= 5*time.Second
 	ethInfo := cachedEthernetLinkInfo
@@ -1179,7 +1176,6 @@ func updateNetDiskUI(netdiskMetrics NetDiskMetrics) {
 
 	if needsRefresh {
 		linkInfoMutex.Lock()
-		// Double-check after acquiring write lock
 		if time.Since(linkInfoLastUpdate) >= 5*time.Second {
 			cachedEthernetLinkInfo = GetEthernetLinkInfo()
 			cachedWiFiLinkInfo = GetWiFiLinkInfo()
@@ -1190,11 +1186,10 @@ func updateNetDiskUI(netdiskMetrics NetDiskMetrics) {
 		linkInfoMutex.Unlock()
 	}
 
-	// Network metrics are in Bytes/sec
-	netOut := formatBytes(netdiskMetrics.OutBytesPerSec, networkUnit)
-	netIn := formatBytes(netdiskMetrics.InBytesPerSec, networkUnit)
+	return ethInfo, wifiInfo
+}
 
-	// Find fastest Ethernet link
+func getBestLinkInfoString(ethInfo []EthernetLinkInfo, wifiInfo *WiFiLinkInfo) string {
 	var bestEth uint64
 	for _, eth := range ethInfo {
 		if eth.LinkUp && eth.LinkSpeedMbps > bestEth {
@@ -1207,16 +1202,27 @@ func updateNetDiskUI(netdiskMetrics NetDiskMetrics) {
 		bestWifi = wifiInfo.TxRateMbps
 	}
 
-	linkInfo := ""
 	if bestEth > 0 && bestEth >= uint64(bestWifi) {
-		linkInfo = FormatLinkSpeed(bestEth)
+		return FormatLinkSpeed(bestEth)
 	} else if wifiInfo != nil && wifiInfo.IsConnected {
 		if wifiInfo.WiFiGeneration != "" {
-			linkInfo = fmt.Sprintf("%s", wifiInfo.WiFiGeneration)
-		} else {
-			linkInfo = fmt.Sprintf("%dMbps", bestWifi)
+			return fmt.Sprintf("%s", wifiInfo.WiFiGeneration)
 		}
+		return fmt.Sprintf("%dMbps", bestWifi)
 	}
+
+	return ""
+}
+
+func updateNetDiskUI(netdiskMetrics NetDiskMetrics) {
+	var sb strings.Builder
+
+	ethInfo, wifiInfo := getCachedLinkInfo()
+
+	netOut := formatBytes(netdiskMetrics.OutBytesPerSec, networkUnit)
+	netIn := formatBytes(netdiskMetrics.InBytesPerSec, networkUnit)
+
+	linkInfo := getBestLinkInfoString(ethInfo, wifiInfo)
 
 	if linkInfo != "" {
 		fmt.Fprintf(&sb, "Net (%s): ↑ %s/s ↓ %s/s\n", linkInfo, netOut, netIn)
@@ -1224,7 +1230,6 @@ func updateNetDiskUI(netdiskMetrics NetDiskMetrics) {
 		fmt.Fprintf(&sb, "Net: ↑ %s/s ↓ %s/s\n", netOut, netIn)
 	}
 
-	// Disk metrics are in KB/s, convert to Bytes for formatBytes
 	diskRead := formatBytes(netdiskMetrics.ReadKBytesPerSec*1024, diskUnit)
 	diskWrite := formatBytes(netdiskMetrics.WriteKBytesPerSec*1024, diskUnit)
 	fmt.Fprintf(&sb, "I/O: R %s/s W %s/s\n", diskRead, diskWrite)
@@ -1234,7 +1239,6 @@ func updateNetDiskUI(netdiskMetrics NetDiskMetrics) {
 		if i >= 3 {
 			break
 		}
-		// Volume info is in GB. Convert to Bytes for formatBytes
 		used := formatBytes(v.Used*1024*1024*1024, diskUnit)
 		total := formatBytes(v.Total*1024*1024*1024, diskUnit)
 		avail := formatBytes(v.Available*1024*1024*1024, diskUnit)
@@ -1242,7 +1246,6 @@ func updateNetDiskUI(netdiskMetrics NetDiskMetrics) {
 		fmt.Fprintf(&sb, "%s: %s/%s (%s free)\n", v.Name, used, total, avail)
 	}
 	NetworkInfo.Text = strings.TrimSuffix(sb.String(), "\n")
-
 }
 
 func updateTBNetUI(tbStats []ThunderboltNetStats) {
