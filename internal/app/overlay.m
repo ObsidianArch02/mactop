@@ -856,14 +856,14 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
   {
     NSString *gear = @"⚙";
     NSDictionary *gearAttrs = @{
-      NSFontAttributeName : [NSFont systemFontOfSize:16 weight:NSFontWeightRegular],
+      NSFontAttributeName : [NSFont systemFontOfSize:20 weight:NSFontWeightRegular],
       NSForegroundColorAttributeName : g_showSettings
           ? overlayNeonGreen()
           : [NSColor colorWithWhite:0.55 alpha:1.0]
     };
     NSSize gearSize = [gear sizeWithAttributes:gearAttrs];
     CGFloat gearX = padX + contentW - gearSize.width;
-    CGFloat gearY = y - 1;
+    CGFloat gearY = y - 3;
     [gear drawAtPoint:NSMakePoint(gearX, gearY) withAttributes:gearAttrs];
     g_gearHitRect = NSMakeRect(gearX - 6, gearY - 4, gearSize.width + 12, gearSize.height + 8);
   }
