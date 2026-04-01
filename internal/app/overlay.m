@@ -12,6 +12,18 @@
 
 #define OVERLAY_SPARKLINE_HISTORY 60
 
+extern char *GoI18nT(char *id);
+
+static NSString *localize(NSString *key) {
+  const char *cKey = [key UTF8String];
+  char *cVal = GoI18nT((char *)cKey);
+  if (!cVal)
+    return key;
+  NSString *res = [NSString stringWithUTF8String:cVal];
+  free(cVal);
+  return res;
+}
+
 // ---------- Metrics struct (passed from Go) ----------
 
 typedef struct {
@@ -876,7 +888,7 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
   NSString *modelName =
       [NSString stringWithUTF8String:m.model_name];
   if (modelName.length == 0)
-    modelName = @"Apple Silicon";
+    modelName = localize(@"Menu_AppleSilicon");
   NSSize dotSize = [dot sizeWithAttributes:dotAttrs];
   [modelName
       drawAtPoint:NSMakePoint(padX + titleSize.width + 5 + dotSize.width + 5,
@@ -915,7 +927,7 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
     [coreSummary appendFormat:@"%dS", m.s_core_count];
   }
   if (m.gpu_core_count > 0) {
-    [coreSummary appendFormat:@" • %d GPU Cores", m.gpu_core_count];
+    [coreSummary appendFormat:@" • %@", [NSString stringWithFormat:localize(@"Overlay_GPUCores"), m.gpu_core_count]];
   }
   [coreSummary drawAtPoint:NSMakePoint(padX, y)
                withAttributes:smallAttrs];
@@ -945,7 +957,7 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
 
     // --- Collapsed Mode ---
     {
-      NSString *header = @"Collapsed Mode";
+      NSString *header = localize(@"Overlay_CollapsedMode");
       NSDictionary *hdrAttrs = @{
         NSFontAttributeName : sectionTitleFont,
         NSForegroundColorAttributeName : overlayNeonGreen()
@@ -1006,7 +1018,7 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
 
     // --- Expanded Mode ---
     {
-      NSString *header = @"Expanded Mode";
+      NSString *header = localize(@"Overlay_ExpandedMode");
       NSDictionary *hdrAttrs = @{
         NSFontAttributeName : sectionTitleFont,
         NSForegroundColorAttributeName : overlayNeonGreen()
@@ -1070,7 +1082,7 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
       [overlayNeonGreen() setFill];
       [btnPath fill];
 
-      NSString *doneText = @"Done";
+      NSString *doneText = localize(@"Overlay_Done");
       NSDictionary *doneAttrs = @{
         NSFontAttributeName : [NSFont systemFontOfSize:14 weight:NSFontWeightBold],
         NSForegroundColorAttributeName : [NSColor colorWithRed:0.05 green:0.05 blue:0.05 alpha:1.0]
@@ -1150,7 +1162,7 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
     [fpsLabel drawAtPoint:NSMakePoint(padX, y + 4) withAttributes:labelAttrs];
 
     if (g_fpsStreamFailed) {
-      NSString *warn = @"Requires Screen Recording Permission";
+      NSString *warn = localize(@"Overlay_RequiresScreenRecordingPermission");
       NSDictionary *warnAttrs = @{
         NSFontAttributeName : [NSFont systemFontOfSize:13 weight:NSFontWeightMedium],
         NSForegroundColorAttributeName : overlayAccentRed()
@@ -1195,7 +1207,7 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
     [fiLabel drawAtPoint:NSMakePoint(padX, y + 4) withAttributes:labelAttrs];
 
     if (g_fpsStreamFailed) {
-      NSString *warn = @"Requires Permission";
+      NSString *warn = localize(@"Overlay_RequiresPermission");
       NSDictionary *warnAttrs = @{
         NSFontAttributeName : [NSFont systemFontOfSize:13 weight:NSFontWeightMedium],
         NSForegroundColorAttributeName : overlayAccentRed()
@@ -1312,10 +1324,10 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
     NSString *powerStr =
         [NSString stringWithFormat:@"%.1fW", m.package_watts];
     drawMetricKV([NSString stringWithUTF8String:sectionDisplayName(kSectionPower)], powerStr, overlayAccentYellow());
-    drawMetricKV(@"  CPU", [NSString stringWithFormat:@"%.1fW", m.cpu_watts], overlayDimText());
-    drawMetricKV(@"  GPU", [NSString stringWithFormat:@"%.1fW", m.gpu_watts], overlayDimText());
-    drawMetricKV(@"  ANE", [NSString stringWithFormat:@"%.1fW", m.ane_watts], overlayDimText());
-    drawMetricKV(@"  DRAM", [NSString stringWithFormat:@"%.1fW", m.dram_watts], overlayDimText());
+    drawMetricKV([NSString stringWithFormat:@"  %@", localize(@"Menu_CPU")], [NSString stringWithFormat:@"%.1fW", m.cpu_watts], overlayDimText());
+    drawMetricKV([NSString stringWithFormat:@"  %@", localize(@"Menu_GPU")], [NSString stringWithFormat:@"%.1fW", m.gpu_watts], overlayDimText());
+    drawMetricKV([NSString stringWithFormat:@"  %@", localize(@"Overlay_ANE")], [NSString stringWithFormat:@"%.1fW", m.ane_watts], overlayDimText());
+    drawMetricKV([NSString stringWithFormat:@"  %@", localize(@"Overlay_DRAM")], [NSString stringWithFormat:@"%.1fW", m.dram_watts], overlayDimText());
   };
 
   void (^drawSectionBandwidth)(void) = ^{
@@ -1327,11 +1339,11 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
   void (^drawSectionGPUFreq)(void) = ^{
     NSString *freqStr;
     if (m.tflops_fp32 > 0) {
-      freqStr = [NSString
-          stringWithFormat:@"%dMHz • %.1f TFLOPS", m.gpu_freq_mhz,
-                           m.tflops_fp32];
+      freqStr = [NSString stringWithFormat:localize(@"Overlay_GPUFreqTFLOPs"),
+                                          m.gpu_freq_mhz, m.tflops_fp32];
     } else {
-      freqStr = [NSString stringWithFormat:@"%d MHz", m.gpu_freq_mhz];
+      freqStr = [NSString stringWithFormat:localize(@"Overlay_GPUFreqMHz"),
+                                          m.gpu_freq_mhz];
     }
     drawMetricKV([NSString stringWithUTF8String:sectionDisplayName(kSectionGPUFreq)], freqStr, overlayAccentOrange());
   };
@@ -1339,10 +1351,11 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
   void (^drawSectionTemps)(void) = ^{
     NSString *tempStr;
     if (m.gpu_temp > 0) {
-      tempStr = [NSString
-          stringWithFormat:@"CPU %.0f°C  GPU %.0f°C", m.cpu_temp, m.gpu_temp];
+      tempStr = [NSString stringWithFormat:localize(@"Overlay_TempsDual"),
+                                          m.cpu_temp, m.gpu_temp];
     } else {
-      tempStr = [NSString stringWithFormat:@"%.0f°C", m.cpu_temp];
+      tempStr = [NSString stringWithFormat:localize(@"Overlay_TempsSingle"),
+                                          m.cpu_temp];
     }
     NSColor *tempColor = overlayBrightText();
     if (m.cpu_temp >= 90 || m.gpu_temp >= 90)
@@ -1356,13 +1369,13 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
     NSString *thermalStr =
         [NSString stringWithUTF8String:m.thermal_state];
     if (thermalStr.length == 0)
-      thermalStr = @"Unknown";
+      thermalStr = localize(@"Metrics_ThermalUnknown");
     NSColor *thermalColor = overlayAccentGreen();
-    if ([thermalStr containsString:@"Critical"])
+    if ([thermalStr isEqualToString:localize(@"Metrics_ThermalCritical")])
       thermalColor = overlayAccentRed();
-    else if ([thermalStr containsString:@"Serious"])
+    else if ([thermalStr isEqualToString:localize(@"Metrics_ThermalSerious")])
       thermalColor = overlayAccentRed();
-    else if ([thermalStr containsString:@"Fair"])
+    else if ([thermalStr isEqualToString:localize(@"Metrics_ThermalFair")])
       thermalColor = overlayAccentYellow();
     drawMetricKV([NSString stringWithUTF8String:sectionDisplayName(kSectionThermal)], thermalStr, thermalColor);
   };
@@ -1504,7 +1517,7 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
     g_opacityFlashCountdown--;
     CGFloat opacityPct = g_overlay_config.opacity * 100.0;
     NSString *opacityStr =
-        [NSString stringWithFormat:@"Opacity: %.0f%%  (scroll to adjust)", opacityPct];
+        [NSString stringWithFormat:localize(@"Overlay_OpacityHint"), opacityPct];
     NSDictionary *opAttrs = @{
       NSFontAttributeName : [NSFont systemFontOfSize:11 weight:NSFontWeightMedium],
       NSForegroundColorAttributeName :

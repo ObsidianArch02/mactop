@@ -237,7 +237,17 @@ func getGPUCores() string {
 	return "?"
 }
 
-func getThermalStateString() (string, bool) {
+type thermalStateLevel int
+
+const (
+	thermalStateUnknown  thermalStateLevel = -1
+	thermalStateNominal  thermalStateLevel = 0
+	thermalStateFair     thermalStateLevel = 1
+	thermalStateSerious  thermalStateLevel = 2
+	thermalStateCritical thermalStateLevel = 3
+)
+
+func getThermalStateLevel() thermalStateLevel {
 	name := C.CString("machdep.xcpm.cpu_thermal_level")
 	defer C.free(unsafe.Pointer(name))
 
@@ -245,19 +255,48 @@ func getThermalStateString() (string, bool) {
 	size := C.size_t(unsafe.Sizeof(val))
 
 	if C.sysctlbyname(name, unsafe.Pointer(&val), &size, nil, 0) != 0 {
-		return i18n.T("Metrics_ThermalNominal"), false
+		return thermalStateNominal
 	}
 
 	switch val {
 	case 0:
-		return i18n.T("Metrics_ThermalNominal"), false
+		return thermalStateNominal
 	case 1:
-		return i18n.T("Metrics_ThermalFair"), true
+		return thermalStateFair
 	case 2:
-		return i18n.T("Metrics_ThermalSerious"), true
+		return thermalStateSerious
 	case 3:
-		return i18n.T("Metrics_ThermalCritical"), true
+		return thermalStateCritical
 	default:
-		return i18n.T("Metrics_ThermalUnknown"), false
+		return thermalStateUnknown
 	}
+}
+
+func thermalStateString(level thermalStateLevel) string {
+	switch level {
+	case thermalStateNominal:
+		return i18n.T("Metrics_ThermalNominal")
+	case thermalStateFair:
+		return i18n.T("Metrics_ThermalFair")
+	case thermalStateSerious:
+		return i18n.T("Metrics_ThermalSerious")
+	case thermalStateCritical:
+		return i18n.T("Metrics_ThermalCritical")
+	default:
+		return i18n.T("Metrics_ThermalUnknown")
+	}
+}
+
+func thermalStateThrottled(level thermalStateLevel) bool {
+	switch level {
+	case thermalStateFair, thermalStateSerious, thermalStateCritical:
+		return true
+	default:
+		return false
+	}
+}
+
+func getThermalStateString() (string, bool) {
+	level := getThermalStateLevel()
+	return thermalStateString(level), thermalStateThrottled(level)
 }

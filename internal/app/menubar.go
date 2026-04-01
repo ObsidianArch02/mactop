@@ -218,6 +218,7 @@ func GoSaveMenuBarConfig(statusBarWidth, statusBarHeight, sparklineWidth, sparkl
 }
 
 // GoI18nT provides direct translation lookup to Objective-C
+//
 //export GoI18nT
 func GoI18nT(id *C.char) *C.char {
 	goID := C.GoString(id)

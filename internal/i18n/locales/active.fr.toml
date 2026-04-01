@@ -216,3 +216,112 @@ Menu_DISK = "DISQUE"
 Menu_POWER = "ÉNERGIE"
 Menu_HISTORY = "HISTORIQUE"
 Menu_FANS = "VENTILATEURS"
+
+CLI_HelpText = """
+Utilisation : mactop [options]
+
+Options :
+  -h, --help              Afficher cette aide
+  -v, --version           Afficher la version de mactop
+  -i, --interval <ms>     Définir l’intervalle de mise à jour en millisecondes (défaut : 1000)
+  --foreground <color>    Définir la couleur d’avant-plan de l’UI (nom ou hex, ex. green, #9580FF)
+  --bg <color>            Définir la couleur d’arrière-plan de l’UI (nom ou hex, ex. mocha-base, #22212C)
+  -p, --prometheus <port> Lancer le serveur de métriques Prometheus sur le port indiqué (ex. :9090)
+      --headless          Exécuter en mode headless (sans TUI, JSON sur stdout)
+      --format <format>   Définir le format de sortie (json, yaml, xml, csv, toon)
+      --pretty            Formater joliment la sortie headless
+      --count <n>         Nombre d’échantillons en mode headless (0 = infini)
+      --dump-ioreport, -d Afficher tous les canaux IOReport disponibles puis quitter
+      --unit-network <unit> Unité réseau : auto, byte, kb, mb, gb (défaut : auto)
+      --unit-disk <unit>    Unité disque : auto, byte, kb, mb, gb (défaut : auto)
+      --unit-temp <unit>    Unité de température : celsius, fahrenheit (défaut : celsius)
+      --pid <pid>         Surveiller un processus précis par PID
+      --menubar           Exécuter en tant qu’élément de barre des menus macOS (sans TUI)
+      --overlay           Afficher une fenêtre HUD flottante au-dessus des applications
+      --overlay-sections  Sections visibles séparées par des virgules (ex. cpu,gpu,memory,power)
+      --overlay-opacity   Opacité de la fenêtre overlay, 0.15-1.0 (défaut : 0.88)
+      --fan-control       Activer le contrôle interactif des ventilateurs (écrit dans le SMC)
+      --dump-temps        Diagnostic : afficher toutes les clés de température SMC puis quitter
+      --dump-debug        Diagnostic : afficher les infos de debug IOReport/HID/SMC/NVMe puis quitter
+
+Fichier de thème :
+  Créez ~/.mactop/theme.json avec des couleurs hex personnalisées :
+  {"foreground": "#9580FF", "background": "#22212C"}
+
+Pour plus d’informations : https://github.com/metaspartan/mactop par Carsen Klock.
+"""
+CLI_Version = "version de mactop : %s"
+CLI_DumpingIOReport = "Affichage des canaux IOReport..."
+CLI_TestInputReceived = "Entrée de test reçue : %s"
+CLI_ErrorForegroundRequiresValue = "Erreur : --foreground nécessite une valeur de couleur"
+CLI_ErrorBackgroundRequiresValue = "Erreur : --bg nécessite une valeur de couleur"
+CLI_ErrorPrometheusRequiresValue = "Erreur : --prometheus nécessite un numéro de port"
+CLI_ErrorIntervalRequiresValue = "Erreur : --interval nécessite une valeur d’intervalle"
+CLI_ErrorInvalidInterval = "Intervalle invalide : %v"
+CLI_ErrorPIDRequiresValue = "Erreur : --pid nécessite une valeur PID"
+CLI_ErrorInvalidPID = "PID invalide : %v"
+CLI_TestingIOReportPowerMetrics = "Test des métriques d’énergie IOReport..."
+CLI_TestSample = "Échantillon %d :"
+CLI_TestSocTemp = "  Temp SoC : %.1f°C"
+CLI_TestCPU = "  CPU : %.2fW | GPU : %.2fW (%d MHz, %.0f%% actif)"
+CLI_TestANE = "  ANE : %.2fW | DRAM : %.2fW | GPU SRAM : %.2fW | Total : %.2fW | %s"
+
+Headless_ErrorInitMetrics = "Impossible d’initialiser les métriques : %v"
+Headless_ErrorUnknownFormat = "Format inconnu : %s. json sera utilisé."
+Headless_ErrorFormattingOutput = "Erreur lors du formatage de la sortie : %v"
+Headless_ErrorPrometheusServer = "Erreur du serveur Prometheus : %v"
+
+Info_OSValue = "macOS %s"
+Info_TFLOPsValue = "%.1f FP32 / %.1f FP16"
+Info_NotAvailable = "N/D"
+Info_PowerValue = "%.2f W (Moy %.0f W)"
+Info_NetworkValue = "↑ %s/s ↓ %s/s"
+Info_DiskValue = "L %s/s E %s/s"
+Info_DRAMBWValue = "L %.1f / E %.1f / %.1f GB/s"
+Info_FanValue = "%d RPM (%s, %d-%d)"
+Info_WiFiValue = "%s @ %dMbps (%s)"
+Info_VolumeValue = "%s / %s (%s libres)"
+
+Fan_CPUTemp = "Temp CPU"
+Fan_GPUTemp = "Temp GPU"
+Fan_NoFansDetected = "Aucun ventilateur détecté"
+Fan_NoTemperatureSensorsDetected = "Aucun capteur de température détecté"
+Fan_ControlActive = "[⚠ CONTRÔLE VENTILATEUR ACTIF](fg:red,mod:bold)  [+/-](fg:%s,mod:bold) Vitesse  [a](fg:%s,mod:bold) Auto  [0/9](fg:%s,mod:bold) Min/Max  [R](fg:green,mod:bold) Réinit  [l](fg:%s) Dispo  [F](fg:%s) Quitter"
+Fan_ReadOnly = "[Lecture seule](fg:%s)  Utilisez --fan-control pour autoriser l’écriture  |  [l](fg:%s,mod:bold) Dispo  [F](fg:%s,mod:bold) Quitter la vue ventilateurs"
+
+Metrics_PowerSparklineGroup = "%.2f W Total (Max : %.2f W)"
+Metrics_PowerSparklineTitle = "Moy %.2f W | %s"
+Metrics_PowerHistoryDetail = "Historique Énergie (Moy %.1fW, Max %.1fW)"
+Metrics_CPUHistoryDetail = "Historique Uti. CPU (%.1f%%)"
+Metrics_MemoryHistoryDetail = "Mém : %.1f/%.1fGB, Échange : %.1fGB"
+
+TUI_KillPIDTitle = " CONFIRMER TUER PID %d "
+
+Menu_Tooltip = "mactop — moniteur Apple Silicon"
+Menu_SettingsTitle = "Réglages barre des menus mactop"
+Menu_ShowCPUBar = "Afficher la barre CPU"
+Menu_ShowGPUBar = "Afficher la barre GPU"
+Menu_ShowANEBar = "Afficher la barre ANE"
+Menu_ShowMemoryBar = "Afficher la barre mémoire"
+Menu_ShowWattageInMenuBar = "Afficher la puissance dans la barre des menus"
+Menu_ShowPercentages = "Afficher les pourcentages"
+Menu_StatusBarWidth = "Largeur de la barre des menus :"
+Menu_StatusBarHeight = "Hauteur de la barre des menus :"
+Menu_BarFontSize = "Taille de police des barres :"
+Menu_WattageFontSize = "Taille de police de la puissance :"
+Menu_Colors = "Couleurs :"
+Menu_DiskRate = "L %.0f KB/s  E %.0f KB/s"
+Menu_FanItem = "Ventilateur %d"
+
+Overlay_DRAM = "DRAM"
+Overlay_CollapsedMode = "Mode réduit"
+Overlay_ExpandedMode = "Mode étendu"
+Overlay_Done = "Terminé"
+Overlay_RequiresScreenRecordingPermission = "Nécessite l’autorisation d’enregistrement d’écran"
+Overlay_RequiresPermission = "Autorisation requise"
+Overlay_OpacityHint = "Opacité : %.0f%%  (faites défiler pour ajuster)"
+Overlay_GPUCores = "%d cœurs GPU"
+Overlay_GPUFreqTFLOPs = "%dMHz • %.1f TFLOPS"
+Overlay_GPUFreqMHz = "%d MHz"
+Overlay_TempsDual = "CPU %.0f°C  GPU %.0f°C"
+Overlay_TempsSingle = "%.0f°C"

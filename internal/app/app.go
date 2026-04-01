@@ -88,7 +88,7 @@ func setupUI() {
 		gauge.Percent = 0
 	}
 	cpuGauge, gpuGauge, memoryGauge, aneGauge = gauges[0], gauges[1], gauges[2], gauges[3]
-	
+
 	cpuGauge.Title = i18n.T("TUI_Loading")
 	gpuGauge.Title = i18n.T("TUI_GPUUsage")
 	memoryGauge.Title = i18n.T("TUI_MemoryUsage")
@@ -188,14 +188,12 @@ func setupUI() {
 	cpuCoreWidget = NewCPUCoreWidget(appleSiliconModel)
 	coreSummary := FormatCoreSummary(cpuCoreWidget.eCoreCount, cpuCoreWidget.pCoreCount, cpuCoreWidget.sCoreCount)
 	totalCPUCores := cpuCoreWidget.eCoreCount + cpuCoreWidget.pCoreCount + cpuCoreWidget.sCoreCount
-	cpuCoreWidget.Title = fmt.Sprintf("%d Cores %s",
-		totalCPUCores,
-		coreSummary,
-	)
-	cpuGauge.Title = fmt.Sprintf("%d Cores %s",
-		totalCPUCores,
-		coreSummary,
-	)
+	coreTitle := fmt.Sprintf(i18n.T("TUI_Cores"), totalCPUCores)
+	if coreSummary != "" {
+		coreTitle = fmt.Sprintf("%s %s", coreTitle, coreSummary)
+	}
+	cpuCoreWidget.Title = coreTitle
+	cpuGauge.Title = coreTitle
 
 	confirmModal = w.NewModal(i18n.T("TUI_ConfirmKill"))
 	confirmModal.Title = i18n.T("TUI_ConfirmKill")
@@ -763,9 +761,9 @@ func updateTotalPowerChart(watts float64) {
 	}
 	sparkline.Data = powerValues
 	sparkline.MaxVal = 8
-	sparklineGroup.Title = fmt.Sprintf("%.2f W Total (Max: %.2f W)", watts, maxPowerSeen)
+	sparklineGroup.Title = fmt.Sprintf(i18n.T("Metrics_PowerSparklineGroup"), watts, maxPowerSeen)
 	thermalStr, _ := getThermalStateString()
-	sparkline.Title = fmt.Sprintf("Avg: %.2f W | %s", avgWatts, thermalStr)
+	sparkline.Title = fmt.Sprintf(i18n.T("Metrics_PowerSparklineTitle"), avgWatts, thermalStr)
 
 	// Update power history StepChart - use terminal width for reliable slicing
 	if powerHistoryChart != nil {
@@ -778,7 +776,7 @@ func updateTotalPowerChart(watts float64) {
 		powerHistoryChart.Data = [][]float64{visibleData}
 		powerHistoryChart.MaxVal = maxPowerSeen * 1.1
 		powerHistoryChart.DataLabels = []string{fmt.Sprintf("%.1fW", watts)}
-		powerHistoryChart.Title = fmt.Sprintf("Power History (Avg: %.1fW, Max: %.1fW)", avgWatts, maxPowerSeen)
+		powerHistoryChart.Title = fmt.Sprintf(i18n.T("Metrics_PowerHistoryDetail"), avgWatts, maxPowerSeen)
 	}
 }
 
@@ -844,7 +842,7 @@ func updateCPUHistory(totalUsage float64) {
 			cpuHistoryChart.Data = [][]float64{visibleData}
 			cpuHistoryChart.MaxVal = scaleMax
 			cpuHistoryChart.DataLabels = []string{fmt.Sprintf("%.0f%%", totalUsage)}
-			cpuHistoryChart.Title = fmt.Sprintf("CPU Usage History (%.1f%%)", totalUsage)
+			cpuHistoryChart.Title = fmt.Sprintf(i18n.T("Metrics_CPUHistoryDetail"), totalUsage)
 		}
 	}
 }
@@ -878,8 +876,7 @@ func updateMemoryHistory(memoryMetrics MemoryMetrics) {
 			fmt.Sprintf("%.1fGB", usedGB),
 			fmt.Sprintf("%.1fGB", swapGB),
 		}
-		memoryHistoryChart.Title = fmt.Sprintf("Mem: %.1f/%.1fGB, Swap: %.1fGB",
-			usedGB, totalGB, swapGB)
+		memoryHistoryChart.Title = fmt.Sprintf(i18n.T("Metrics_MemoryHistoryDetail"), usedGB, totalGB, swapGB)
 	}
 }
 
@@ -1018,14 +1015,13 @@ func calculateCoreAverages(coreUsages []float64) (ecoreAvg, pcoreAvg, scoreAvg f
 }
 
 func updateCPUPrometheusMetrics(totalUsage, ecoreAvg, pcoreAvg, scoreAvg float64, coreUsages []float64, cpuMetrics CPUMetrics, memoryMetrics MemoryMetrics) {
-	thermalStateVal, _ := getThermalStateString()
 	thermalStateNum := 0
-	switch thermalStateVal {
-	case "Fair":
+	switch getThermalStateLevel() {
+	case thermalStateFair:
 		thermalStateNum = 1
-	case "Serious":
+	case thermalStateSerious:
 		thermalStateNum = 2
-	case "Critical":
+	case thermalStateCritical:
 		thermalStateNum = 3
 	}
 
@@ -1237,9 +1233,9 @@ func updateTBNetUI(tbStats []ThunderboltNetStats) {
 	lastTBInBytes = totalBytesIn
 	lastTBOutBytes = totalBytesOut
 	rdmaStatus := CheckRDMAAvailable()
-	rdmaLabel := "RDMA: Disabled"
+	rdmaLabel := fmt.Sprintf("%s: %s", i18n.T("Info_RDMA"), i18n.T("Info_Disabled"))
 	if rdmaStatus.Available {
-		rdmaLabel = "RDMA: Enabled"
+		rdmaLabel = fmt.Sprintf("%s: %s", i18n.T("Info_RDMA"), i18n.T("Info_Enabled"))
 	}
 
 	// Use formatBytes for consistent unit display
@@ -1247,18 +1243,18 @@ func updateTBNetUI(tbStats []ThunderboltNetStats) {
 	outStr := formatBytes(totalBytesOut, networkUnit)
 
 	// Set simple title
-	tbInfoParagraph.Title = "Thunderbolt / RDMA"
+	tbInfoParagraph.Title = i18n.T("TUI_ThunderboltRDMA")
 
 	// Use cached device info
 	tbInfoMutex.Lock()
 	tbDeviceInfo := tbDeviceInfo
 	tbInfoMutex.Unlock()
 	if tbDeviceInfo == "" {
-		tbDeviceInfo = "Loading..."
+		tbDeviceInfo = i18n.T("TUI_Loading")
 	}
 
 	// Show RDMA status and bandwidth in text, above device list
-	tbInfoParagraph.Text = fmt.Sprintf("%s | TB Net: ↓%s/s ↑%s/s\n%s", rdmaLabel, inStr, outStr, tbDeviceInfo)
+	tbInfoParagraph.Text = fmt.Sprintf("%s | %s: ↓%s/s ↑%s/s\n%s", rdmaLabel, i18n.T("Info_TBNet"), inStr, outStr, tbDeviceInfo)
 
 	// Update TB Net sparklines with separate download/upload
 	// Shift values left and add new values
@@ -1286,7 +1282,7 @@ func updateTBNetUI(tbStats []ThunderboltNetStats) {
 
 	// Update sparklines and group title
 	if tbNetSparklineGroup != nil {
-		tbNetSparklineGroup.Title = fmt.Sprintf("TB Net: ↓%s/s ↑%s/s", inStr, outStr)
+		tbNetSparklineGroup.Title = fmt.Sprintf("%s: ↓%s/s ↑%s/s", i18n.T("Info_TBNet"), inStr, outStr)
 		if tbNetSparklineIn != nil {
 			tbNetSparklineIn.Data = tbNetInValues
 			tbNetSparklineIn.MaxVal = maxValIn * 1.1
