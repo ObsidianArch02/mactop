@@ -8,8 +8,10 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -628,13 +630,13 @@ func Run() {
 	flag.Parse()
 
 	// Initialize i18n engine with override priorities
-	overrideLang := currentConfig.Language
+	resolvedLanguage = currentConfig.Language
 	if cliLanguage != "" {
-		overrideLang = cliLanguage // CLI overrides config.json
+		resolvedLanguage = cliLanguage // CLI overrides config.json
 	} else if envLang := os.Getenv("MACTOP_LANG"); envLang != "" {
-		overrideLang = envLang
+		resolvedLanguage = envLang
 	}
-	i18n.Init(overrideLang)
+	i18n.Init(resolvedLanguage)
 
 	// If cli.go didn't catch --foreground (e.g., because it used an '=' sign like --foreground=green)
 	// then flag.Parse() will have populated cliFgColor. Update colorName and setColor.
@@ -683,6 +685,15 @@ func Run() {
 	triggerProcessCollectionChan := make(chan struct{}, 1)
 
 	startBackgroundWorkers()
+
+	// Ensure worker processes are killed on SIGINT/SIGTERM (e.g. terminal close)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		shutdownWorkers()
+		os.Exit(0)
+	}()
 
 	go collectMetrics(done, cpuMetricsChan, gpuMetricsChan, tbNetStatsChan, triggerProcessCollectionChan)
 	go collectProcessMetrics(done, processMetricsChan, triggerProcessCollectionChan)
@@ -1357,4 +1368,31 @@ func startBackgroundWorkers() {
 			stderrLogger.Printf("Failed to start overlay worker: %v\n", err)
 		}
 	}
+}
+
+// shutdownWorkers kills any running overlay/menubar worker processes.
+func shutdownWorkers() {
+	overlayMu.Lock()
+	if overlayWorkerStdin != nil {
+		overlayWorkerStdin.Close()
+		overlayWorkerStdin = nil
+	}
+	if overlayWorkerCmd != nil && overlayWorkerCmd.Process != nil {
+		overlayWorkerCmd.Process.Kill()
+		overlayWorkerCmd = nil
+	}
+	overlayMetricsEncoder = nil
+	overlayMu.Unlock()
+
+	menubarMu.Lock()
+	if menubarWorkerStdin != nil {
+		menubarWorkerStdin.Close()
+		menubarWorkerStdin = nil
+	}
+	if menubarWorkerCmd != nil && menubarWorkerCmd.Process != nil {
+		menubarWorkerCmd.Process.Kill()
+		menubarWorkerCmd = nil
+	}
+	menubarMetricsEncoder = nil
+	menubarMu.Unlock()
 }

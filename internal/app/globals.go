@@ -3,6 +3,7 @@ package app
 import (
 	"log"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
@@ -10,6 +11,16 @@ import (
 	w "github.com/metaspartan/gotui/v5/widgets"
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+// init locks goroutine 1 to the main OS thread before the scheduler runs.
+// This is required because macOS AppKit (used by --overlay-worker and
+// --menubar-worker) demands that NSApplication and NSWindow operations
+// happen on the actual main thread (thread 0). Without this, the Go
+// scheduler may migrate goroutine 1 to a different OS thread by the time
+// the worker code calls C.initOverlay/C.initMenuBar, causing a crash.
+func init() {
+	runtime.LockOSThread()
+}
 
 var (
 	version                                                     = "v2.1.3"
@@ -70,7 +81,8 @@ var (
 	filterPID       int     // Monitor a specific process by PID (0 = all)
 	cliFgColor      string  // Foreground color from --foreground flag (used for = assignments)
 	cliBgColor      string  // Background color from --bg flag
-	cliLanguage     string  // Language override flag
+	cliLanguage      string // Language override flag
+	resolvedLanguage string // Final resolved language (CLI > env > config > system)
 	fanControl      bool    // Enable interactive fan speed control (requires --fan-control flag)
 	overlay         bool    // Show floating overlay HUD window
 	overlayWorker   bool    // Hidden: run as overlay worker process

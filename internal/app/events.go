@@ -113,6 +113,7 @@ func handleModeKeys(key string, done chan struct{}) {
 	switch key {
 	case "q", "<C-c>":
 		close(done)
+		shutdownWorkers()
 		ui.Close()
 		os.Exit(0)
 	case "r":

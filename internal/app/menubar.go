@@ -230,7 +230,8 @@ func GoI18nT(id *C.char) *C.char {
 // startMenuBarWorker is the entry point for the child process (--menubar-worker).
 // It reads JSON metrics from stdin and updates the menu bar on the main thread.
 func startMenuBarWorker() {
-	runtime.LockOSThread()
+	// NOTE: runtime.LockOSThread() is called in init() to ensure goroutine 1
+	// stays on the main OS thread, which AppKit requires for NSWindow creation.
 
 	// Load config in the worker process so defaults/persistence works
 	loadConfig()
@@ -390,12 +391,14 @@ func startMenuBarProcess() error {
 	}
 
 	cmd := exec.Command(exe, "--menubar-worker")
-	cmd.Env = append(os.Environ(), "MACTOP_LANG="+cliLanguage)
+	cmd.Env = append(os.Environ(), "MACTOP_LANG="+resolvedLanguage)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("failed to get stdin pipe: %v", err)
 	}
+
+	cmd.Stderr = os.Stderr
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start worker: %v", err)

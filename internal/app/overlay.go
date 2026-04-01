@@ -237,7 +237,8 @@ func setOverlaySectionFlag(ccfg *C.overlay_config_t, section string) {
 // startOverlayWorker is the entry point for the child process (--overlay-worker).
 // It reads JSON metrics from stdin and updates the overlay on the main thread.
 func startOverlayWorker() {
-	runtime.LockOSThread()
+	// NOTE: runtime.LockOSThread() is called in init() to ensure goroutine 1
+	// stays on the main OS thread, which AppKit requires for NSWindow creation.
 
 	// Apply section filtering and opacity from environment variables
 	sections := os.Getenv("MACTOP_OVERLAY_SECTIONS")
@@ -411,7 +412,7 @@ func startOverlayProcess() error {
 		fmt.Sprintf("MACTOP_OVERLAY_OPACITY=%.2f", effectiveOpacity),
 		"MACTOP_OVERLAY_COLLAPSED="+collapsedStr,
 		"MACTOP_OVERLAY_EXPANDED="+expandedStr,
-		"MACTOP_LANG="+cliLanguage,
+		"MACTOP_LANG="+resolvedLanguage,
 	)
 
 	stdin, err := cmd.StdinPipe()
