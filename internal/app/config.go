@@ -166,8 +166,8 @@ func filterValidSections(sections []string) []string {
 // loadOverlayConfig returns the overlay config with defaults applied
 func loadOverlayConfig() OverlayConfig {
 	cfg := OverlayConfig{
-		CollapsedSections: overlayDefaultCollapsed,
-		ExpandedOrder:     overlayDefaultExpanded,
+		CollapsedSections: append([]string(nil), overlayDefaultCollapsed...),
+		ExpandedOrder:     append([]string(nil), overlayDefaultExpanded...),
 	}
 	if currentConfig.Overlay == nil {
 		return cfg

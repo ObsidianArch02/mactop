@@ -166,7 +166,7 @@ func copyToCCharBuf(dst unsafe.Pointer, src string, maxLen int) {
 	if len(bytes) >= maxLen {
 		bytes = bytes[:maxLen-1]
 	}
-	p := (*[512]C.char)(dst)
+	p := unsafe.Slice((*C.char)(dst), maxLen)
 	for i, b := range bytes {
 		p[i] = C.char(b)
 	}
