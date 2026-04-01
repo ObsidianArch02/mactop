@@ -87,7 +87,7 @@ func getVolumes() []VolumeInfo {
 
 func getSOCInfo() SystemInfo {
 	cpuInfoDict := getCPUInfo()
-	
+
 	// Use authoritative core counts from BuildCoreLabels which matches the gauge
 	// and accurately cross-references IORegistry with sysctl perflevels.
 	_, eCount, pCount, sCount, _ := BuildCoreLabels()
