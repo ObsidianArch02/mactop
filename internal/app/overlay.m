@@ -429,6 +429,7 @@ static _Atomic uint32_t g_fpsValue = 0;         // Last computed FPS
 static _Atomic uint32_t g_frameIntervalUs = 0;  // Frame interval in microseconds (×1000 for ms)
 static dispatch_source_t g_fpsTimer = NULL;
 static uint64_t g_fpsLastTimestamp = 0;
+static BOOL g_fpsStreamFailed = NO;
 
 static double machTimeToSeconds(uint64_t elapsed) {
   static mach_timebase_info_data_t sTimebase = {0};
@@ -450,6 +451,7 @@ enum {
 static void startFPSCounter(void) {
   if (!loadCGDisplayStreamSymbols()) {
     // CGDisplayStream not available — FPS feature silently disabled
+    g_fpsStreamFailed = YES;
     return;
   }
 
@@ -484,6 +486,7 @@ static void startFPSCounter(void) {
       });
 
   if (!g_fpsStream) {
+    g_fpsStreamFailed = YES;
     return; // Stream creation failed — FPS silently unavailable
   }
   fn_CGDisplayStreamStart(g_fpsStream);
@@ -1115,10 +1118,23 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
 
   // Section draw blocks — each renders one section at the current y position
   void (^drawSectionFPS)(void) = ^{
-    uint32_t fps = atomic_load(&g_fpsValue);
     NSString *fpsLabel = @"FPS";
     [fpsLabel drawAtPoint:NSMakePoint(padX, y + 4) withAttributes:labelAttrs];
 
+    if (g_fpsStreamFailed) {
+      NSString *warn = @"Requires Screen Recording Permission";
+      NSDictionary *warnAttrs = @{
+        NSFontAttributeName : [NSFont systemFontOfSize:13 weight:NSFontWeightMedium],
+        NSForegroundColorAttributeName : overlayAccentRed()
+      };
+      NSSize warnSize = [warn sizeWithAttributes:warnAttrs];
+      [warn drawAtPoint:NSMakePoint(padX + contentW - warnSize.width, y + 5)
+          withAttributes:warnAttrs];
+      y += rowH;
+      return;
+    }
+
+    uint32_t fps = atomic_load(&g_fpsValue);
     NSString *fpsVal = [NSString stringWithFormat:@"%u", fps];
     NSDictionary *fpsAttrs = @{
       NSFontAttributeName : valueFont,
@@ -1144,10 +1160,24 @@ static void drawMiniBar(CGFloat x, CGFloat y, CGFloat w, CGFloat h,
   };
 
   void (^drawSectionFrame)(void) = ^{
-    uint32_t frameIntUs = atomic_load(&g_frameIntervalUs);
-    double frameMs = frameIntUs / 1000.0;
     NSString *fiLabel = @"Frame";
     [fiLabel drawAtPoint:NSMakePoint(padX, y + 4) withAttributes:labelAttrs];
+
+    if (g_fpsStreamFailed) {
+      NSString *warn = @"Requires Permission";
+      NSDictionary *warnAttrs = @{
+        NSFontAttributeName : [NSFont systemFontOfSize:13 weight:NSFontWeightMedium],
+        NSForegroundColorAttributeName : overlayAccentRed()
+      };
+      NSSize warnSize = [warn sizeWithAttributes:warnAttrs];
+      [warn drawAtPoint:NSMakePoint(padX + contentW - warnSize.width, y + 5)
+          withAttributes:warnAttrs];
+      y += rowH;
+      return;
+    }
+
+    uint32_t frameIntUs = atomic_load(&g_frameIntervalUs);
+    double frameMs = frameIntUs / 1000.0;
 
     NSString *fiVal;
     if (frameIntUs > 0) {
