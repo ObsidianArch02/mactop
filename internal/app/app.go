@@ -692,6 +692,7 @@ func Run() {
 	go func() {
 		<-sigCh
 		shutdownWorkers()
+		ui.Close()
 		os.Exit(0)
 	}()
 
