@@ -1089,7 +1089,7 @@ static void buildMenu(void) {
     [menu addItem:g_delegate.powerGpuItem];
     g_delegate.powerAneItem = makeMetricItem([NSString stringWithFormat:@"%@:", localize(@"Overlay_ANE")], @"\u2014");
     [menu addItem:g_delegate.powerAneItem];
-    g_delegate.powerDramItem = makeMetricItem([NSString stringWithFormat:@"%@:", localize(@"Overlay_Memory")], @"\u2014"); // Equivalent to DRAM:
+    g_delegate.powerDramItem = makeMetricItem([NSString stringWithFormat:@"%@:", localize(@"Overlay_DRAM")], @"\u2014");
     [menu addItem:g_delegate.powerDramItem];
     g_delegate.thermalItem = makeMetricItem(localize(@"Menu_Thermal"), @"\u2014");
     [menu addItem:g_delegate.thermalItem];
