@@ -18,6 +18,7 @@ import (
 
 	"sync"
 
+	"github.com/mattn/go-runewidth"
 	ui "github.com/metaspartan/gotui/v5"
 	w "github.com/metaspartan/gotui/v5/widgets"
 	"github.com/metaspartan/mactop/v2/internal/i18n"
@@ -590,10 +591,11 @@ func renderLoadingScreen() {
 
 	// Horizontally center the loading text manually with spaces
 	msg := i18n.T("TUI_Loading")
+	msgWidth := runewidth.StringWidth(msg)
 	innerWidth := termWidth - 2 // subtract outer block borders
 	leftPad := ""
-	if innerWidth > len(msg) {
-		for i := 0; i < (innerWidth-len(msg))/2; i++ {
+	if innerWidth > msgWidth {
+		for i := 0; i < (innerWidth-msgWidth)/2; i++ {
 			leftPad += " "
 		}
 	}
