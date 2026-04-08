@@ -561,6 +561,51 @@ func runAlternateMode() bool {
 	return false
 }
 
+// renderLoadingScreen shows a branded loading message centered on screen.
+// Called immediately after ui.Init() to give instant visual feedback while
+// metrics subsystems initialize in the background.
+func renderLoadingScreen() {
+	termWidth, termHeight := ui.TerminalDimensions()
+
+	loadingBlock := ui.NewBlock()
+	loadingBlock.BorderRounded = true
+	loadingBlock.Title = i18n.T("TUI_MactopTitle")
+	loadingBlock.TitleRight = " " + version + " "
+	loadingBlock.TitleAlignment = ui.AlignLeft
+	loadingBlock.BorderStyle = ui.NewStyle(ui.ColorGreen)
+	loadingBlock.TitleStyle = ui.NewStyle(ui.ColorGreen)
+	loadingBlock.SetRect(0, 0, termWidth, termHeight)
+
+	loadingText := w.NewParagraph()
+	loadingText.Border = false
+
+	// Build vertically centered text: pad with newlines to reach middle
+	innerHeight := termHeight - 2 // subtract outer block borders
+	topPad := ""
+	if innerHeight > 3 {
+		for i := 0; i < (innerHeight/2)-1; i++ {
+			topPad += "\n"
+		}
+	}
+
+	// Horizontally center the loading text manually with spaces
+	msg := i18n.T("TUI_Loading")
+	innerWidth := termWidth - 2 // subtract outer block borders
+	leftPad := ""
+	if innerWidth > len(msg) {
+		for i := 0; i < (innerWidth-len(msg))/2; i++ {
+			leftPad += " "
+		}
+	}
+
+	loadingText.Text = topPad + leftPad + msg
+	loadingText.TextStyle = ui.NewStyle(ui.ColorGreen)
+	loadingText.SetRect(1, 1, termWidth-1, termHeight-1)
+
+	ui.Clear()
+	ui.Render(loadingBlock, loadingText)
+}
+
 // seedInitialMetrics takes a quick sample and pushes initial values into the metric channels.
 func seedInitialMetrics() {
 	m := sampleSocMetrics(100)
@@ -661,6 +706,10 @@ func Run() {
 	}
 	defer ui.Close()
 
+	// Show branded loading screen immediately — gives instant visual feedback
+	// while metrics subsystems initialize (especially DRAM BW calibration on M5+).
+	renderLoadingScreen()
+
 	if err := initSocMetrics(); err != nil {
 		stderrLogger.Fatalf("failed to initialize metrics: %v", err)
 	}
@@ -678,9 +727,42 @@ func Run() {
 	setupGrid()
 	termWidth, termHeight := ui.TerminalDimensions()
 	setupMainBlockLayout(termWidth, termHeight)
-	renderUI()
 
+	// Seed metrics and consume them to populate all widgets BEFORE the first render.
+	// This ensures users see a fully-populated TUI instead of blank/zero gauges.
 	seedInitialMetrics()
+
+	// Drain seeded data into widgets so the first render is complete
+	select {
+	case cpuMetrics := <-cpuMetricsChan:
+		lastCPUMetrics = cpuMetrics
+		updateCPUUI(cpuMetrics)
+		updateTotalPowerChart(cpuMetrics.PackageW)
+	default:
+	}
+	select {
+	case gpuMetrics := <-gpuMetricsChan:
+		lastGPUMetrics = gpuMetrics
+		updateGPUUI(gpuMetrics)
+	default:
+	}
+	select {
+	case netdiskMetrics := <-netdiskMetricsChan:
+		lastNetDiskMetrics = netdiskMetrics
+		updateNetDiskUI(netdiskMetrics)
+	default:
+	}
+	select {
+	case processes := <-processMetricsChan:
+		lastProcesses = processes
+		updateProcessList()
+	default:
+	}
+	updateInfoUI()
+
+	// Transition from loading screen to full TUI
+	ui.Clear()
+	renderUI()
 
 	triggerProcessCollectionChan := make(chan struct{}, 1)
 
