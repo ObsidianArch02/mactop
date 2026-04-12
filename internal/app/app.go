@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -51,11 +50,8 @@ func setupUI() {
 	cachedCurrentUser = os.Getenv("USER")
 	cachedShell = os.Getenv("SHELL")
 
-	kv, _ := exec.Command("uname", "-r").Output()
-	cachedKernelVersion = strings.TrimSpace(string(kv))
-
-	ov, _ := exec.Command("sw_vers", "-productVersion").Output()
-	cachedOSVersion = strings.TrimSpace(string(ov))
+	cachedKernelVersion, _ = sysctlStringByName("kern.osrelease")
+	cachedOSVersion, _ = sysctlStringByName("kern.osproductversion")
 
 	cachedModelName = modelName
 	cachedSystemInfo = appleSiliconModel
@@ -185,8 +181,6 @@ func setupUI() {
 	cpuHistoryChart.ShowAxes = false
 	cpuHistoryChart.ShowRightAxis = true
 	cpuHistoryChart.LineColors = []ui.Color{ui.ColorGreen}
-
-	updateProcessList()
 
 	cpuCoreWidget = NewCPUCoreWidget(appleSiliconModel)
 	coreSummary := FormatCoreSummary(cpuCoreWidget.eCoreCount, cpuCoreWidget.pCoreCount, cpuCoreWidget.sCoreCount)
@@ -582,10 +576,10 @@ func renderLoadingScreen() {
 
 	// Build vertically centered text: pad with newlines to reach middle
 	innerHeight := termHeight - 2 // subtract outer block borders
-	topPad := ""
+	var topPad strings.Builder
 	if innerHeight > 3 {
 		for i := 0; i < (innerHeight/2)-1; i++ {
-			topPad += "\n"
+			topPad.WriteString("\n")
 		}
 	}
 
@@ -593,14 +587,14 @@ func renderLoadingScreen() {
 	msg := i18n.T("TUI_Loading")
 	msgWidth := runewidth.StringWidth(msg)
 	innerWidth := termWidth - 2 // subtract outer block borders
-	leftPad := ""
+	var leftPad strings.Builder
 	if innerWidth > msgWidth {
 		for i := 0; i < (innerWidth-msgWidth)/2; i++ {
-			leftPad += " "
+			leftPad.WriteString(" ")
 		}
 	}
 
-	loadingText.Text = topPad + leftPad + msg
+	loadingText.Text = topPad.String() + leftPad.String() + msg
 	loadingText.TextStyle = ui.NewStyle(ui.ColorGreen)
 	loadingText.SetRect(1, 1, termWidth-1, termHeight-1)
 
@@ -640,7 +634,7 @@ func drainSeededMetrics() {
 
 // seedInitialMetrics takes a quick sample and pushes initial values into the metric channels.
 func seedInitialMetrics() {
-	m := sampleSocMetrics(100)
+	m := sampleSocMetrics(50)
 	_, throttled := getThermalStateString()
 	componentSum := m.TotalPower
 	totalPower := componentSum
@@ -734,7 +728,7 @@ func Run() {
 	IsLightMode = detectLightMode()
 
 	if err := ui.Init(); err != nil {
-		stderrLogger.Fatalf("failed to initialize termui: %v", err)
+		stderrLogger.Fatalf("failed to initialize gotui: %v", err)
 	}
 	defer ui.Close()
 
