@@ -57,6 +57,7 @@
 - Support for all Apple Silicon models
 - **Auto-detect Light/Dark Mode**: Automatically adjusts UI colors based on your terminal's background color or system theme.
 - **Configurable Units**: Customize units for network, disk, and temperature display (`--unit-network`, `--unit-disk`, `--unit-temp`)
+- **Multi-Language Support (i18n)**: 19 languages with automatic system language detection — English, Arabic, Chinese, Dutch, French, German, Hebrew, Hindi, Indonesian, Italian, Japanese, Korean, Polish, Portuguese, Russian, Spanish, Thai, Turkish, Vietnamese (`--lang` to override)
 
 ## Install via Homebrew
 
@@ -116,7 +117,7 @@ After installation, you can start `mactop` by simply running:
 Example with flags:
 
 ```bash
-mactop --interval 1000 --foreground green
+mactop --interval 1000 --foreground green --lang ja
 ```
 
 Custom Hex Colors:
@@ -152,6 +153,7 @@ mactop --headless --format toon
 - `--unit-network`: Network unit: auto, byte, kb, mb, gb (default: auto)
 - `--unit-disk`: Disk unit: auto, byte, kb, mb, gb (default: auto)
 - `--unit-temp`: Temperature unit: celsius, fahrenheit (default: celsius)
+- `--lang`: Language override (e.g., `en`, `es`, `ja`, `zh`). Auto-detects system language if not set. Priority: CLI flag > `MACTOP_LANG` env var > `config.json` > system language.
 - `--fan-control`: Enable interactive fan speed control (**⚠️ writes to SMC** — use with caution, may require sudo on some macOS versions)
 - `--menubar`: Run as a macOS menu bar status item alongside the TUI.
 - `--overlay`: Run as a floating overlay HUD window with FPS metrics. (**Requires Screen Recording permission** — see [Permissions](#permissions) below)
