@@ -1,7 +1,6 @@
 package app
 
 import (
-	"os"
 	"time"
 
 	ui "github.com/metaspartan/gotui/v5"
@@ -112,10 +111,7 @@ func handleResizeEvent(e ui.Event) {
 func handleModeKeys(key string, done chan struct{}) {
 	switch key {
 	case "q", "<C-c>":
-		close(done)
-		shutdownWorkers()
-		ui.Close()
-		os.Exit(0)
+		shutdownAndExit(true)
 	case "r":
 		w, h := ui.TerminalDimensions()
 		UpdateCachedTerminalDimensions(w, h)

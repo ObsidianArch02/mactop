@@ -773,9 +773,7 @@ func Run() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		shutdownWorkers()
-		ui.Close()
-		os.Exit(0)
+		shutdownAndExit(false)
 	}()
 
 	go collectMetrics(done, cpuMetricsChan, gpuMetricsChan, tbNetStatsChan, triggerProcessCollectionChan)
@@ -1478,4 +1476,18 @@ func shutdownWorkers() {
 	}
 	menubarMetricsEncoder = nil
 	menubarMu.Unlock()
+}
+
+var shutdownOnce sync.Once
+
+func shutdownAndExit(closeDone bool) {
+	shutdownOnce.Do(func() {
+		if closeDone {
+			defer func() { _ = recover() }()
+			close(done)
+		}
+		shutdownWorkers()
+		ui.Close()
+		os.Exit(0)
+	})
 }

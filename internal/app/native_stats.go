@@ -1024,8 +1024,6 @@ func GetNativeNetworkMetrics() (map[string]NativeNetMetric, error) {
 			continue
 		}
 
-		// Skip loopback (lo0) — localhost traffic is not real network I/O
-		// and can easily dominate totals on dev machines running local servers.
 		if ifa.ifa_flags&C.IFF_LOOPBACK != 0 {
 			continue
 		}

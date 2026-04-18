@@ -12,14 +12,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// init locks goroutine 1 to the main OS thread before the scheduler runs.
-// This is required because macOS AppKit (used by --overlay-worker and
-// --menubar-worker) demands that NSApplication and NSWindow operations
-// happen on the actual main thread (thread 0). Without this, the Go
-// scheduler may migrate goroutine 1 to a different OS thread by the time
-// the worker code calls C.initOverlay/C.initMenuBar, causing a crash.
+// AppKit in the worker subprocesses requires goroutine 1 on thread 0; must
+// decide before flag.Parse, so scan os.Args.
 func init() {
-	runtime.LockOSThread()
+	for _, a := range os.Args[1:] {
+		if a == "--overlay-worker" || a == "-overlay-worker" ||
+			a == "--menubar-worker" || a == "-menubar-worker" {
+			runtime.LockOSThread()
+			return
+		}
+	}
 }
 
 var (
