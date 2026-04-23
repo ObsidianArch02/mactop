@@ -234,6 +234,8 @@ func startMenuBarWorker() {
 	// NOTE: runtime.LockOSThread() is called in init() to ensure goroutine 1
 	// stays on the main OS thread, which AppKit requires for NSWindow creation.
 
+	i18n.Init(os.Getenv("MACTOP_LANG"))
+
 	// Load config in the worker process so defaults/persistence works
 	loadConfig()
 	applyMenuBarConfig()

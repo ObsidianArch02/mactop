@@ -146,7 +146,12 @@ int startDisplayFPSCounter(void) {
     atomic_store(&g_dfpsRunning, 0);
     return -1; // Stream creation failed (no display, permission denied, etc.)
   }
-  fn_DFPSStart(g_dfpsStream);
+  if (fn_DFPSStart(g_dfpsStream) != 0) {
+    CFRelease(g_dfpsStream);
+    g_dfpsStream = NULL;
+    atomic_store(&g_dfpsRunning, 0);
+    return -1;
+  }
 
   g_dfpsLastTimestamp = mach_absolute_time();
 
