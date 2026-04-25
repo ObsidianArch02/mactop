@@ -257,12 +257,7 @@ func migrateThemeName(theme string) string {
 }
 
 func loadConfig() {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		currentConfig = AppConfig{DefaultLayout: "default"}
-		return
-	}
-	configPath := filepath.Join(homeDir, ".mactop", "config.json")
+	configPath := mactopConfigPath("config.json")
 
 	file, err := os.ReadFile(configPath)
 	if err != nil {
@@ -275,23 +270,17 @@ func loadConfig() {
 		currentConfig = AppConfig{DefaultLayout: "default"}
 	}
 
-	// Migrate old theme names
 	if currentConfig.Theme != "" {
 		newTheme := migrateThemeName(currentConfig.Theme)
 		if newTheme != currentConfig.Theme {
 			currentConfig.Theme = newTheme
-			// Save the migrated config
 			saveConfig()
 		}
 	}
 }
 
 func saveConfig() {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	configDir := filepath.Join(homeDir, ".mactop")
+	configDir := mactopConfigDir()
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return
 	}
@@ -305,7 +294,7 @@ func saveConfig() {
 	os.WriteFile(configPath, data, 0644)
 }
 
-// loadThemeFile loads custom theme from ~/.mactop/theme.json if it exists
+// loadThemeFile loads custom theme from the mactop config directory if it exists
 // Theme file format:
 //
 //	{
@@ -313,12 +302,7 @@ func saveConfig() {
 //	  "background": "#22212C"
 //	}
 func loadThemeFile() *CustomThemeConfig {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-
-	themePath := filepath.Join(homeDir, ".mactop", "theme.json")
+	themePath := mactopConfigPath("theme.json")
 	file, err := os.ReadFile(themePath)
 	if err != nil {
 		return nil
