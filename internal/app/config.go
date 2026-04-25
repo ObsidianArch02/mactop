@@ -198,6 +198,46 @@ func loadOverlayConfig() OverlayConfig {
 
 var currentConfig AppConfig
 
+const mactopAppDirName = "mactop"
+
+func mactopLegacyDir() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(os.TempDir(), mactopAppDirName)
+	}
+	return filepath.Join(homeDir, ".mactop")
+}
+
+func xdgAppDir(envName string) (string, bool) {
+	baseDir := os.Getenv(envName)
+	if baseDir == "" || !filepath.IsAbs(baseDir) {
+		return "", false
+	}
+	return filepath.Join(baseDir, mactopAppDirName), true
+}
+
+func mactopConfigDir() string {
+	if dir, ok := xdgAppDir("XDG_CONFIG_HOME"); ok {
+		return dir
+	}
+	return mactopLegacyDir()
+}
+
+func mactopStateDir() string {
+	if dir, ok := xdgAppDir("XDG_STATE_HOME"); ok {
+		return dir
+	}
+	return mactopLegacyDir()
+}
+
+func mactopConfigPath(name string) string {
+	return filepath.Join(mactopConfigDir(), name)
+}
+
+func mactopStatePath(name string) string {
+	return filepath.Join(mactopStateDir(), name)
+}
+
 // migrateThemeName converts old 'catppuccin-*' theme names to short form
 func migrateThemeName(theme string) string {
 	oldToNew := map[string]string{
