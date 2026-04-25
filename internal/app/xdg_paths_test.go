@@ -137,3 +137,41 @@ func TestLoadThemeFileUsesXDGConfigHome(t *testing.T) {
 		t.Fatalf("Background = %q, want #22212C", theme.Background)
 	}
 }
+
+func TestSetupLogfileUsesXDGStateHome(t *testing.T) {
+	setTestHome(t)
+	stateHome := filepath.Join(t.TempDir(), "xdg-state")
+	t.Setenv("XDG_STATE_HOME", stateHome)
+
+	logfile, err := setupLogfile()
+	if err != nil {
+		t.Fatalf("setupLogfile() error = %v", err)
+	}
+	defer logfile.Close()
+
+	want := filepath.Join(stateHome, "mactop", "mactop.log")
+	if logfile.Name() != want {
+		t.Fatalf("logfile.Name() = %q, want %q", logfile.Name(), want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("expected log file at %s: %v", want, err)
+	}
+}
+
+func TestSetupLogfileFallsBackToLegacyDir(t *testing.T) {
+	home := setTestHome(t)
+
+	logfile, err := setupLogfile()
+	if err != nil {
+		t.Fatalf("setupLogfile() error = %v", err)
+	}
+	defer logfile.Close()
+
+	want := filepath.Join(home, ".mactop", "mactop.log")
+	if logfile.Name() != want {
+		t.Fatalf("logfile.Name() = %q, want %q", logfile.Name(), want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("expected log file at %s: %v", want, err)
+	}
+}
